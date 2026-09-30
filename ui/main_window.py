@@ -1,397 +1,365 @@
+"""Tkinter dashboard; inference runs outside the Tk event loop."""
+
+import logging
+import queue
+import time
 import tkinter as tk
-from PIL import Image, ImageTk
+from tkinter import filedialog, messagebox
+
 import cv2
+from PIL import Image, ImageTk
+
+from modules.registration import RegistrationError, register_person
+
+logger = logging.getLogger(__name__)
 
 
 class MainWindow:
-
     def __init__(self, root, config):
-
         self.root = root
         self.config = config
-
+        self.worker = None
         self.camera = None
-        self.face_module = None
-        self.object_module = None
-        self.threat_module = None
-        self.alert_system = None
         self.database = None
+        self._closed = False
+        self._poll_id = None
+        self._last_stats = 0.0
+        self._last_frame = 0.0
+        self._monitoring = False
 
-        self.root.title("AI Security Monitor")
-        self.root.geometry("1400x850")
-        self.root.configure(bg="#111827")
+        root.title("VisionGuardAI · Security Monitor")
+        root.geometry("1400x850")
+        root.minsize(1024, 650)
+        root.configure(bg="#111827")
+        root.protocol("WM_DELETE_WINDOW", self.close)
 
-        # =========================
-        # Header
-        # =========================
-
-        header = tk.Frame(
-            self.root,
-            bg="#1f2937",
-            height=60
-        )
+        header = tk.Frame(root, bg="#1f2937", height=66)
         header.pack(fill="x")
-
-        title = tk.Label(
+        tk.Label(
             header,
-            text="AI SECURITY MONITOR",
+            text="VISIONGUARDAI",
             bg="#1f2937",
             fg="white",
-            font=("Segoe UI", 18, "bold")
+            font=("Segoe UI", 19, "bold"),
+        ).pack(side="left", padx=22, pady=14)
+        tk.Button(
+            header,
+            text="Register face",
+            command=self.open_registration,
+            bg="#2563eb",
+            fg="white",
+            padx=12,
+        ).pack(side="right", padx=(0, 15))
+        tk.Button(
+            header,
+            text="Reload faces",
+            command=self.reload_faces,
+            bg="#374151",
+            fg="white",
+            padx=12,
+        ).pack(side="right", padx=8)
+        self.retry_button = tk.Button(
+            header,
+            text="Retry camera",
+            command=self.retry_camera,
+            bg="#374151",
+            fg="white",
+            padx=12,
+            state="disabled",
         )
-        title.pack(pady=12)
+        self.retry_button.pack(side="right", padx=8)
 
-        # =========================
-        # Main Layout
-        # =========================
-
-        main = tk.Frame(
-            self.root,
-            bg="#111827"
-        )
+        main = tk.Frame(root, bg="#111827")
         main.pack(fill="both", expand=True)
-
-        # Camera Area
-
-        left_panel = tk.Frame(
-            main,
-            bg="#111827"
-        )
-        left_panel.pack(
-            side="left",
-            fill="both",
-            expand=True
-        )
-
+        left = tk.Frame(main, bg="#111827")
+        left.pack(side="left", fill="both", expand=True)
         self.video = tk.Label(
-            left_panel,
-            bg="black"
+            left,
+            bg="#030712",
+            fg="#cbd5e1",
+            text="Waiting for camera…",
+            font=("Segoe UI", 20),
         )
-        self.video.pack(
-            fill="both",
-            expand=True,
-            padx=10,
-            pady=10
-        )
+        self.video.pack(fill="both", expand=True, padx=12, pady=12)
 
-        # Dashboard Area
-
-        right_panel = tk.Frame(
-            main,
-            bg="#1f2937",
-            width=320
-        )
-        right_panel.pack(
-            side="right",
-            fill="y"
-        )
-
+        side = tk.Frame(main, bg="#1f2937", width=325)
+        side.pack(side="right", fill="y")
+        side.pack_propagate(False)
         tk.Label(
-            right_panel,
+            side,
             text="SYSTEM STATUS",
             bg="#1f2937",
             fg="white",
-            font=("Segoe UI", 14, "bold")
-        ).pack(pady=15)
-
-        self.threat_label = tk.Label(
-            right_panel,
-            text="Threat: LOW",
-            bg="#1f2937",
-            fg="lime",
-            font=("Segoe UI", 16, "bold")
-        )
-        self.threat_label.pack(pady=10)
-
-        self.persons_label = tk.Label(
-            right_panel,
-            text="Registered Persons: 0",
-            bg="#1f2937",
-            fg="white",
-            font=("Segoe UI", 12)
-        )
-        self.persons_label.pack(pady=10)
-
-        self.alerts_label = tk.Label(
-            right_panel,
-            text="Alerts: 0",
-            bg="#1f2937",
-            fg="white",
-            font=("Segoe UI", 12)
-        )
-        self.alerts_label.pack(pady=10)
-
-        self.faces_label = tk.Label(
-            right_panel,
-            text="Faces: 0",
-            bg="#1f2937",
-            fg="white",
-            font=("Segoe UI", 12)
-        )
-        self.faces_label.pack(pady=10)
-
-        self.unknown_label = tk.Label(
-            right_panel,
-            text="Unknown Faces: 0",
-            bg="#1f2937",
-            fg="orange",
-            font=("Segoe UI", 12)
-        )
-        self.unknown_label.pack(pady=10)
-
-        self.object_label = tk.Label(
-            right_panel,
-            text="Objects: 0",
-            bg="#1f2937",
-            fg="white",
-            font=("Segoe UI", 12)
-        )
-        self.object_label.pack(pady=10)
-
-        self.hazard_label = tk.Label(
-            right_panel,
-            text="Hazardous Objects: 0",
-            bg="#1f2937",
-            fg="red",
-            font=("Segoe UI", 12)
-        )
-        self.hazard_label.pack(pady=10)
-
+            font=("Segoe UI", 14, "bold"),
+        ).pack(anchor="w", padx=18, pady=(18, 12))
+        self.threat_label = self._label(side, "Threat: —", 17, "#cbd5e1")
+        self.persons_label = self._label(side, "Registered persons: 0")
+        self.alerts_label = self._label(side, "Alerts: 0")
+        self.detections_label = self._label(side, "Logged incidents: 0")
+        self.faces_label = self._label(side, "Faces: 0")
+        self.unknown_label = self._label(side, "Unknown faces: 0", fg="#fbbf24")
+        self.object_label = self._label(side, "Objects: 0")
+        self.hazard_label = self._label(side, "Hazardous objects: 0", fg="#fb7185")
         tk.Label(
-            right_panel,
-            text="Recent Events",
+            side,
+            text="RECENT ALERTS",
             bg="#1f2937",
             fg="white",
-            font=("Segoe UI", 13, "bold")
-        ).pack(pady=(20, 5))
-
+            font=("Segoe UI", 13, "bold"),
+        ).pack(anchor="w", padx=18, pady=(24, 5))
         self.log_box = tk.Listbox(
-            right_panel,
-            bg="#111827",
-            fg="white",
-            height=15
+            side, bg="#111827", fg="#e2e8f0", borderwidth=0, selectbackground="#334155"
         )
-        self.log_box.pack(
-            fill="both",
-            expand=True,
-            padx=10,
-            pady=10
-        )
-
+        self.log_box.pack(fill="both", expand=True, padx=12, pady=(0, 12))
         self.status = tk.Label(
-            self.root,
-            text="Monitoring Active",
+            root,
+            text="Starting…",
             bg="#374151",
             fg="white",
             anchor="w",
-            padx=10
+            padx=12,
+            font=("Segoe UI", 10),
         )
         self.status.pack(fill="x")
 
-    def set_modules(
-        self,
-        camera,
-        face_module,
-        object_module,
-        threat_module,
-        alert_system,
-        database
-    ):
-        self.camera = camera
-        self.face_module = face_module
-        self.object_module = object_module
-        self.threat_module = threat_module
-        self.alert_system = alert_system
-        self.database = database
+    @staticmethod
+    def _label(parent, text, size=11, fg="white"):
+        widget = tk.Label(
+            parent,
+            text=text,
+            bg="#1f2937",
+            fg=fg,
+            font=("Segoe UI", size),
+            anchor="w",
+            justify="left",
+        )
+        widget.pack(fill="x", padx=18, pady=5)
+        return widget
+
+    def set_modules(self, camera, worker, database):
+        self.camera, self.worker, self.database = camera, worker, database
+        try:
+            for row in reversed(
+                database.get_recent_alerts(self.config.EVENT_LOG_MAX_LINES)
+            ):
+                self._add_event(
+                    row["timestamp"][11:19] + " UTC",
+                    row["threat_level"],
+                    row["message"],
+                )
+            self._refresh_stats()
+        except Exception:
+            logger.exception("Could not load dashboard statistics")
+        self._schedule_poll()
 
     def start(self):
-        self.update_frame()
-
-    def update_frame(self):
-
-        if self.camera:
-
-            frame = self.camera.get_frame()
-
-            if frame is not None:
-
-                faces = []
-                objects = []
-
-                try:
-                    if self.face_module:
-                        faces = self.face_module.detect_and_recognize(frame)
-                except Exception as e:
-                    print("Face error:", e)
-
-                try:
-                    if self.object_module:
-                        objects = self.object_module.detect(frame)
-                except Exception as e:
-                    print("Object error:", e)
-
-                # Draw Faces
-
-                for face in faces:
-
-                    left, top, right, bottom = face.bbox
-
-                    color = (
-                        (0, 255, 0)
-                        if face.is_known
-                        else (0, 0, 255)
-                    )
-
-                    cv2.rectangle(
-                        frame,
-                        (left, top),
-                        (right, bottom),
-                        color,
-                        2
-                    )
-
-                    label = face.name
-
-                    if face.confidence > 0:
-                        label += f" {face.confidence:.2f}"
-
-                    cv2.putText(
-                        frame,
-                        label,
-                        (left, top - 10),
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        0.6,
-                        color,
-                        2
-                    )
-
-                # Draw Objects
-
-                for obj in objects:
-
-                    x1, y1, x2, y2 = obj.bbox
-
-                    cv2.rectangle(
-                        frame,
-                        (x1, y1),
-                        (x2, y2),
-                        obj.color,
-                        2
-                    )
-
-                    text = f"{obj.label} {obj.confidence:.2f}"
-
-                    if obj.is_hazardous:
-                        text += f" [{obj.threat_modifier}]"
-
-                    cv2.putText(
-                        frame,
-                        text,
-                        (x1, y1 - 10),
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        0.6,
-                        obj.color,
-                        2
-                    )
-
-                known_faces = sum(
-                    1 for f in faces if f.is_known
-                )
-
-                unknown_faces = sum(
-                    1 for f in faces if not f.is_known
-                )
-
-                hazardous = sum(
-                    1 for o in objects if o.is_hazardous
-                )
-
-                # Dashboard Updates
-
-                self.faces_label.config(
-                    text=f"Faces: {len(faces)}"
-                )
-
-                self.unknown_label.config(
-                    text=f"Unknown Faces: {unknown_faces}"
-                )
-
-                self.object_label.config(
-                    text=f"Objects: {len(objects)}"
-                )
-
-                self.hazard_label.config(
-                    text=f"Hazardous Objects: {hazardous}"
-                )
-
-                if self.database:
-
-                    try:
-                        stats = self.database.get_statistics()
-
-                        self.persons_label.config(
-                            text=f"Registered Persons: {stats['registered_persons']}"
-                        )
-
-                        self.alerts_label.config(
-                            text=f"Alerts: {stats['total_alerts']}"
-                        )
-
-                    except:
-                        pass
-
-                if hazardous > 0:
-                    self.threat_label.config(
-                        text="Threat: HIGH",
-                        fg="red"
-                    )
-                elif unknown_faces > 0:
-                    self.threat_label.config(
-                        text="Threat: MEDIUM",
-                        fg="orange"
-                    )
-                else:
-                    self.threat_label.config(
-                        text="Threat: LOW",
-                        fg="lime"
-                    )
-
-                status_text = (
-                    f"Faces: {len(faces)} | "
-                    f"Known: {known_faces} | "
-                    f"Unknown: {unknown_faces} | "
-                    f"Objects: {len(objects)} | "
-                    f"Hazardous: {hazardous}"
-                )
-
-                self.status.config(
-                    text=status_text
-                )
-
-                rgb = cv2.cvtColor(
-                    frame,
-                    cv2.COLOR_BGR2RGB
-                )
-
-                img = Image.fromarray(rgb)
-
-                photo = ImageTk.PhotoImage(img)
-
-                self.video.configure(image=photo)
-                self.video.image = photo
-
-        self.root.after(
-            30,
-            self.update_frame
-        )
+        if not self.worker.start():
+            self._monitoring = False
+            self.retry_button.config(state="normal")
+            self.status.config(text="Inference worker is busy · retry in a moment")
+            return
+        self._monitoring = True
+        self._last_frame = time.monotonic()
+        self.retry_button.config(state="disabled")
+        self.status.config(text="Monitoring active · waiting for frames", bg="#374151")
 
     def show_no_camera(self):
-
+        self._monitoring = False
+        self.retry_button.config(state="normal")
         self.status.config(
-            text="Camera Not Available"
+            text="Camera unavailable · check permissions and camera index, then retry",
+            bg="#92400e",
         )
+        self.video.configure(image="", text="NO CAMERA DETECTED")
+        self.video.image = None
+        self.threat_label.config(text="Threat: —", fg="#cbd5e1")
 
-        self.video.configure(
-            text="NO CAMERA DETECTED",
-            font=("Arial", 24)
+    def retry_camera(self):
+        self.retry_button.config(state="disabled")
+        self.status.config(text="Opening camera…")
+        if self.worker:
+            self.worker.stop()
+        self.camera.stop()
+        try:
+            if self.camera.start():
+                self.start()
+            else:
+                self.show_no_camera()
+        except Exception:
+            logger.exception("Camera restart failed")
+            self.show_no_camera()
+
+    def reload_faces(self):
+        if self.worker and self._monitoring:
+            self.worker.reload_faces()
+            self.status.config(text="Reloading registered faces…")
+        else:
+            messagebox.showinfo(
+                "Face gallery",
+                "Faces will load when the camera starts.",
+                parent=self.root,
+            )
+
+    def open_registration(self):
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Register a face")
+        dialog.geometry("480x245")
+        dialog.configure(bg="#1f2937")
+        dialog.transient(self.root)
+        name, image = tk.StringVar(), tk.StringVar()
+        tk.Label(dialog, text="Person name", bg="#1f2937", fg="white").pack(
+            anchor="w", padx=20, pady=(14, 2)
         )
+        tk.Entry(dialog, textvariable=name).pack(fill="x", padx=20)
+        tk.Label(
+            dialog, text="Photo with exactly one visible face", bg="#1f2937", fg="white"
+        ).pack(anchor="w", padx=20, pady=(12, 2))
+        row = tk.Frame(dialog, bg="#1f2937")
+        row.pack(fill="x", padx=20)
+        tk.Entry(row, textvariable=image).pack(side="left", fill="x", expand=True)
+
+        def browse():
+            path = filedialog.askopenfilename(
+                parent=dialog, filetypes=[("Images", "*.jpg *.jpeg *.png *.bmp")]
+            )
+            if path:
+                image.set(path)
+
+        tk.Button(row, text="Browse", command=browse).pack(side="left", padx=(8, 0))
+
+        def save():
+            try:
+                register_person(
+                    name.get(), image.get(), config=self.config, database=self.database
+                )
+            except RegistrationError as exc:
+                messagebox.showerror("Invalid registration", str(exc), parent=dialog)
+                return
+            except Exception:
+                logger.exception("Face registration failed")
+                messagebox.showerror(
+                    "Registration failed",
+                    "Could not save this registration. Check the console.",
+                    parent=dialog,
+                )
+                return
+            self._refresh_stats()
+            if self.worker and self._monitoring:
+                self.worker.reload_faces()
+            dialog.destroy()
+            messagebox.showinfo(
+                "Registered", "The face was registered successfully.", parent=self.root
+            )
+
+        tk.Button(
+            dialog, text="Register", command=save, bg="#2563eb", fg="white", padx=14
+        ).pack(pady=18)
+
+    def _refresh_stats(self):
+        if not self.database:
+            return
+        try:
+            stats = self.database.get_statistics()
+            self.persons_label.config(
+                text=f"Registered persons: {stats['registered_persons']}"
+            )
+            self.alerts_label.config(text=f"Alerts: {stats['total_alerts']}")
+            self.detections_label.config(
+                text=f"Logged incidents: {stats['total_detections']}"
+            )
+        except Exception:
+            logger.exception("Could not read dashboard statistics")
+        self._last_stats = time.monotonic()
+
+    def _add_event(self, timestamp, level, description):
+        self.log_box.insert(tk.END, f"{timestamp}  [{level}] {description}")
+        while self.log_box.size() > self.config.EVENT_LOG_MAX_LINES:
+            self.log_box.delete(0)
+        self.log_box.yview_moveto(1)
+
+    def _schedule_poll(self):
+        if not self._closed:
+            self._poll_id = self.root.after(
+                self.config.UI_UPDATE_INTERVAL_MS, self._poll
+            )
+
+    def _poll(self):
+        if self._closed:
+            return
+        try:
+            if self.worker:
+                while True:
+                    try:
+                        event = self.worker.events.get_nowait()
+                    except queue.Empty:
+                        break
+                    self._add_event(
+                        event["timestamp"], event["threat_level"], event["description"]
+                    )
+                    self._refresh_stats()
+                latest = None
+                while True:
+                    try:
+                        latest = self.worker.frames.get_nowait()
+                    except queue.Empty:
+                        break
+                if latest is not None and self._monitoring:
+                    self._apply_result(latest)
+                    self._last_frame = time.monotonic()
+            if self._monitoring and self.camera and not self.camera.is_available:
+                self.show_no_camera()
+            elif self._monitoring and time.monotonic() - self._last_frame > 5:
+                self.retry_button.config(state="normal")
+                self.status.config(
+                    text="No recent camera frames · check the camera or retry",
+                    bg="#92400e",
+                )
+            if time.monotonic() - self._last_stats >= 1:
+                self._refresh_stats()
+        except Exception:
+            logger.exception("Dashboard update failed")
+        self._schedule_poll()
+
+    def _apply_result(self, result):
+        self.retry_button.config(state="disabled")
+        assessment = result.assessment
+        level = assessment["threat_level"]
+        self.threat_label.config(
+            text=f"Threat: {level}", fg=self.config.THREAT_LEVELS[level]["hex"]
+        )
+        self.faces_label.config(text=f"Faces: {len(result.faces)}")
+        self.unknown_label.config(text=f"Unknown faces: {assessment['unknown_count']}")
+        self.object_label.config(text=f"Objects: {len(result.objects)}")
+        self.hazard_label.config(
+            text=f"Hazardous objects: {len(assessment['hazardous_objects'])}"
+        )
+        if result.warnings:
+            self.status.config(
+                text="DEGRADED · " + "; ".join(result.warnings), bg="#92400e"
+            )
+        else:
+            self.status.config(
+                text=f"Monitoring active · {assessment['description']}", bg="#374151"
+            )
+        rgb = cv2.cvtColor(result.frame, cv2.COLOR_BGR2RGB)
+        image = Image.fromarray(rgb)
+        width = max(640, self.video.winfo_width() - 8)
+        height = max(400, self.video.winfo_height() - 8)
+        image.thumbnail((width, height), Image.Resampling.LANCZOS)
+        photo = ImageTk.PhotoImage(image)
+        self.video.configure(image=photo, text="")
+        self.video.image = photo
+
+    def close(self):
+        if self._closed:
+            return
+        self._closed = True
+        if self._poll_id is not None:
+            self.root.after_cancel(self._poll_id)
+        if self.worker:
+            self.worker.stop()
+        if self.camera:
+            self.camera.stop()
+        if self.database:
+            self.database.close()
+        self.root.destroy()

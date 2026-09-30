@@ -1,323 +1,154 @@
-"""
-Alert System
-============
+"""Incident alerts, screenshots and annotated video overlays."""
 
-Handles:
-- Threat alerts
-- Screenshot capture
-- Overlay drawing
-- Alert cooldown
-"""
+import logging
+import time
+import uuid
+from datetime import datetime, timezone
 
 import cv2
-import time
-import logging
-from pathlib import Path
-from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
 
 class AlertSystem:
-
     def __init__(self, config, database):
-
         self.config = config
         self.database = database
+        self.config.SCREENSHOTS_DIR.mkdir(parents=True, exist_ok=True)
+        self.last_alert_time = float("-inf")
+        self.last_alert_level = None
+        self.session_id = uuid.uuid4().hex
 
-        self.last_alert_time = 0
-
-        # Absolute project path
-        self.base_dir = Path(__file__).resolve().parent.parent
-
-        self.screenshot_dir = self.base_dir / "data" / "screenshots"
-
+    def process(self, assessment, frame):
+        """Return one new incident or None. Only HIGH/CRITICAL produce alerts."""
+        level = assessment["threat_level"]
+        if level not in ("HIGH", "CRITICAL"):
+            return None
+        now = time.monotonic()
+        escalation = level == "CRITICAL" and self.last_alert_level != "CRITICAL"
+        if (
+            not escalation
+            and now - self.last_alert_time < self.config.ALERT_COOLDOWN_SECONDS
+        ):
+            return None
+        self.last_alert_time, self.last_alert_level = now, level
+        description = assessment["description"]
+        screenshot = None
+        if self.config.ALERT_SCREENSHOT_ON_HIGH_RISK or (
+            self.config.ALERT_SCREENSHOT_ON_UNKNOWN and assessment["unknown_count"] > 0
+        ):
+            screenshot = self.save_incident_screenshot(frame, level)
+        objects = [
+            {"label": label, "confidence": confidence}
+            for label, confidence in assessment["all_objects"]
+        ]
         try:
-            self.screenshot_dir.mkdir(
-                parents=True,
-                exist_ok=True
+            self.database.log_alert(level, description, level)
+            self.database.log_detection(
+                event_type="incident",
+                person_name=(assessment["known_persons"] or [None])[0],
+                person_is_known=(
+                    0
+                    if assessment["unknown_count"]
+                    else 1
+                    if assessment["known_persons"]
+                    else None
+                ),
+                objects=objects,
+                threat_level=level,
+                screenshot_path=screenshot,
+                session_id=self.session_id,
             )
+        except Exception:
+            logger.exception("Failed to record incident")
+        logger.warning("[%s] %s", level, description)
+        return {
+            "timestamp": datetime.now(timezone.utc).strftime("%H:%M:%S UTC"),
+            "threat_level": level,
+            "description": description,
+            "screenshot_path": screenshot,
+        }
 
-            logger.info(
-                f"Screenshots folder: {self.screenshot_dir}"
-            )
-
-        except Exception as exc:
-            logger.error(
-                f"Failed creating screenshot directory: {exc}"
-            )
-
-    # --------------------------------------------------
-    # Alert Processing
-    # --------------------------------------------------
-
-    def process(
-        self,
-        assessment,
-        frame
-    ):
-
+    def save_incident_screenshot(self, frame, label="EVENT"):
+        filename = f"{label}_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}.jpg"
+        path = self.config.SCREENSHOTS_DIR / filename
         try:
-
-            threat_level = assessment.get(
-                "threat_level",
-                "LOW"
-            )
-
-            if threat_level not in (
-                "HIGH",
-                "CRITICAL"
-            ):
-                return
-
-            now = time.time()
-
-            cooldown = getattr(
-                self.config,
-                "ALERT_COOLDOWN_SECONDS",
-                10
-            )
-
-            if now - self.last_alert_time < cooldown:
-                return
-
-            self.last_alert_time = now
-
-            description = assessment.get(
-                "description",
-                ""
-            )
-
-            logger.warning(
-                f"[{threat_level}] {description}"
-            )
-
-            try:
-                self.database.log_alert(
-                    alert_type=threat_level,
-                    message=description,
-                    threat_level=threat_level
-                )
-            except Exception as exc:
-                logger.error(
-                    f"Database alert logging failed: {exc}"
-                )
-
-            self.save_incident_screenshot(
-                frame,
-                threat_level
-            )
-
-        except Exception as exc:
-            logger.error(
-                f"Alert processing error: {exc}"
-            )
-
-    # --------------------------------------------------
-    # Screenshot
-    # --------------------------------------------------
-
-    def save_incident_screenshot(
-        self,
-        frame,
-        label="EVENT"
-    ):
-
-        try:
-
-            timestamp = datetime.now().strftime(
-                "%Y%m%d_%H%M%S"
-            )
-
-            filename = (
-                f"{label}_{timestamp}.jpg"
-            )
-
-            path = (
-                self.screenshot_dir /
-                filename
-            )
-
-            success = cv2.imwrite(
-                str(path),
-                frame
-            )
-
-            if success:
-                logger.info(
-                    f"Screenshot saved: {path}"
-                )
-                return str(path)
-
+            ok, data = cv2.imencode(".jpg", frame)
+            if not ok:
+                raise OSError("OpenCV could not encode screenshot")
+            data.tofile(str(path))
+            return str(path)
+        except (OSError, cv2.error):
+            logger.exception("Screenshot save failed")
             return None
 
-        except Exception as exc:
-            logger.error(
-                f"Screenshot save failed: {exc}"
-            )
-            return None
-
-    # --------------------------------------------------
-    # Overlay Drawing
-    # --------------------------------------------------
-
-    def draw_overlays(
-        self,
-        frame,
-        faces,
-        objects,
-        assessment,
-        fps=0
-    ):
-
+    def draw_overlays(self, frame, faces, objects, assessment, fps=0):
         output = frame.copy()
-
-        # ---------------------------------
-        # Faces
-        # ---------------------------------
-
         for face in faces:
-
-            try:
-
-                x1, y1, x2, y2 = face.bbox
-
-                color = (
-                    (0, 255, 0)
-                    if face.is_known
-                    else
-                    (0, 0, 255)
-                )
-
-                cv2.rectangle(
-                    output,
-                    (x1, y1),
-                    (x2, y2),
-                    color,
-                    2
-                )
-
-                label = (
-                    face.name
-                    if face.is_known
-                    else
-                    "Unknown"
-                )
-
-                cv2.putText(
-                    output,
-                    label,
-                    (x1, y1 - 10),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.6,
-                    color,
-                    2
-                )
-
-            except Exception:
-                pass
-
-        # ---------------------------------
-        # Objects
-        # ---------------------------------
-
+            x1, y1, x2, y2 = map(int, face.bbox)
+            color = (0, 210, 0) if face.is_known else (0, 0, 255)
+            cv2.rectangle(output, (x1, y1), (x2, y2), color, 2)
+            name = face.name if face.is_known else "Unknown"
+            cv2.putText(
+                output,
+                name,
+                (x1, max(15, y1 - 8)),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.6,
+                color,
+                2,
+            )
         for obj in objects:
-
-            try:
-
-                x1, y1, x2, y2 = obj.bbox
-
-                color = getattr(
-                    obj,
-                    "color",
-                    (255, 255, 0)
-                )
-
-                cv2.rectangle(
-                    output,
-                    (x1, y1),
-                    (x2, y2),
-                    color,
-                    2
-                )
-
-                text = (
-                    f"{obj.label} "
-                    f"{obj.confidence:.2f}"
-                )
-
-                cv2.putText(
-                    output,
-                    text,
-                    (x1, y1 - 10),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.5,
-                    color,
-                    2
-                )
-
-            except Exception:
-                pass
-
-        # ---------------------------------
-        # Threat Banner
-        # ---------------------------------
-
-        level = assessment.get(
-            "threat_level",
-            "LOW"
-        )
-
-        description = assessment.get(
-            "description",
-            ""
-        )
-
-        banner_color = {
-            "LOW": (0, 180, 0),
-            "MEDIUM": (0, 200, 255),
-            "HIGH": (0, 140, 255),
-            "CRITICAL": (0, 0, 255)
-        }.get(level, (0, 180, 0))
-
-        cv2.rectangle(
-            output,
-            (0, 0),
-            (650, 45),
-            banner_color,
-            -1
-        )
-
+            x1, y1, x2, y2 = map(int, obj.bbox)
+            cv2.rectangle(output, (x1, y1), (x2, y2), obj.color, 2)
+            label = f"{obj.label} {obj.confidence:.2f}"
+            cv2.putText(
+                output,
+                label,
+                (x1, max(15, y1 - 8)),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.55,
+                obj.color,
+                2,
+            )
+        level = assessment["threat_level"]
+        color = {
+            "LOW": (0, 130, 0),
+            "MEDIUM": (0, 170, 230),
+            "HIGH": (0, 120, 240),
+            "CRITICAL": (0, 0, 220),
+        }[level]
+        width, height = output.shape[1], output.shape[0]
+        cv2.rectangle(output, (0, 0), (width, min(42, height)), color, -1)
         cv2.putText(
             output,
             f"THREAT: {level}",
-            (10, 28),
+            (10, min(29, height - 1)),
             cv2.FONT_HERSHEY_SIMPLEX,
-            0.8,
+            0.75,
             (255, 255, 255),
-            2
+            2,
         )
-
-        if fps > 0:
-
+        if fps > 0 and width >= 360:
             cv2.putText(
                 output,
                 f"FPS: {fps:.1f}",
-                (500, 28),
+                (width - 150, min(29, height - 1)),
                 cv2.FONT_HERSHEY_SIMPLEX,
-                0.7,
+                0.6,
                 (255, 255, 255),
-                2
+                2,
             )
-
-        cv2.putText(
-            output,
-            description[:100],
-            (10, output.shape[0] - 15),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.6,
-            (255, 255, 255),
-            2
-        )
-
+        if height >= 100:
+            description = assessment["description"][: max(0, (width - 20) // 12)]
+            cv2.rectangle(output, (0, height - 35), (width, height), (10, 15, 25), -1)
+            cv2.putText(
+                output,
+                description,
+                (10, height - 12),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.55,
+                (255, 255, 255),
+                1,
+            )
         return output

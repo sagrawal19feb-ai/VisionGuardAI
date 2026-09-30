@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# Local people, incident records and generated model outputs
+/data/security.db
+/data/security.db-*
+/data/security.db-*/
+/data/faces/
+/data/screenshots/
+/runs/
+
+# Editors and OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
