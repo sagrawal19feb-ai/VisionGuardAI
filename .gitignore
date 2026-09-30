@@ -12,7 +12,6 @@ venv/
 /data/faces/
 /data/screenshots/
 /data/predictions/
-/data/models/visionguard_gridnet.pt*
 /data/models/visionguard_frcnn.pt*
 /dataset/
 /runs/
