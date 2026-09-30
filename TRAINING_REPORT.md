@@ -28,4 +28,4 @@ Selected Open Images official **test** photos, match IoU ≥ 0.50, all class sco
 2. Check all label boxes, including empty scenes, and audit apparent false positives. More reliable labels and harder negatives matter at least as much as more epochs.
 3. Rebuild the model using `python train_quality.py` (see [README](README.md)), then test a **new, untouched** dataset, measuring per-class precision/recall and misses before adjusting thresholds. Keep a human monitoring the system.
 
-**Verification:** 16 automated tests pass; a trained checkpoint loads and detects a labeled gun image without downloading any weights at runtime. The GUI and webcam could not be run in this environment.
+**Verification:** 16 automated tests pass; a trained checkpoint loaded and detected a labeled gun image without downloading any weights at runtime. The GUI and webcam could not be run in this environment. Local public photos were removed after evaluation to keep the deliverable compact; the manifests and source IDs remain, and the README gives the download commands.

@@ -40,7 +40,7 @@ The repository also keeps `modules/custom_detector.py` (GridNet), a hand-written
 
 ## Rebuild/fine-tune it yourself
 
-The downloaded public **photos are not committed**. To build reproducible local data from Open Images (streams large official box CSVs, then downloads selected photos):
+The downloaded public **photos are not committed** and were removed from the packaged workspace to keep it small; the image IDs, manifests, and source records remain under `dataset/` in this workspace (also Git-ignored). Run the following commands to download photos again before retraining or using `evaluate_detector.py` (the official train CSV is large but streamed, not stored):
 
 ```sh
 python prepare_openimages.py --split train --per-class 300 --backgrounds 120
