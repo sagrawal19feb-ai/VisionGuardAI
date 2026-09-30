@@ -1,76 +1,96 @@
 # VisionGuardAI
 
-A local Python desktop security-monitoring prototype: live webcam capture, face detection/recognition, YOLO object detection, configurable threat policy, a Tkinter dashboard, and incident screenshots and SQLite logs.
+A local Python security-monitoring **prototype** with webcam capture, face recognition, a train-it-yourself object-detection neural network, a Tkinter dashboard, and incident logs/screenshots. No YOLO, Ultralytics or pretrained object-detection model is used.
 
 Created for the **13th Gurugram Police Cyber Security Summer Internship Program (GPCSSI 2026)** by Shivansh Agrawal and Kushagra Singh.
 
-> **Important:** This is a prototype, not a certified safety or identity-verification system. Detection may miss people or objects, and a recognized person is not inherently safe. Keep a human in the loop. The bundled COCO YOLOv8n model **does not recognize guns**; a custom model with a `gun` label is needed for that configured rule. The dashboard displays a degraded-coverage warning for unsupported hazard labels.
+> **This is not a certified safety or identity-verification system.** A missed detection is not proof of safety. Keep a human in the loop. Before training, the dashboard explicitly warns that object detection is unavailable; training on a few photos does **not** make it reliable.
 
-## Requirements
+## 1. Install once
 
-- Python 3.10+; Windows 10/11 is the primary desktop target. Other platforms need a working Tkinter installation (for example, `python3-tk` on Debian/Ubuntu), webcam and GUI display.
-- Webcam and local disk space for logs/screenshots.
-- Install dependencies in an isolated environment:
+Use Python 3.10+ on a desktop with a webcam and a GUI display (Windows 10/11 is the primary target). For CPU training/inference:
 
 ```sh
 python -m venv .venv
-# Windows: .venv\Scripts\activate
+# Windows PowerShell: .venv\Scripts\Activate.ps1
+# Windows Command Prompt: .venv\Scripts\activate.bat
 # macOS/Linux: source .venv/bin/activate
+python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
 python -m pip install -r requirements.txt
 ```
 
-Use **`opencv-contrib-python`**, not `opencv-python`: LBPH face recognition needs `cv2.face`. If both are installed, remove the conflicting OpenCV package and reinstall the requirements in a fresh environment. CPU-only YOLO inference can be slow; the UI stays responsive because inference runs in a worker thread. Use trusted model checkpoints only: PyTorch `.pt` loading may execute untrusted pickle code.
+If you have a supported GPU, follow [PyTorch's installer](https://pytorch.org/get-started/locally/) instead of the CPU-install line. On Debian/Ubuntu also install `python3-tk`. Install `opencv-contrib-python` (from the requirements), **not** the conflicting `opencv-python`: `cv2.face` needs the contrib build. A fresh environment avoids OpenCV conflicts.
 
-## Run
+## 2. Collect your pictures
+
+Create `dataset/images/` and copy in photos or extracted camera frames (JPG, PNG or BMP). **You supply and label the training data; none is bundled.** Supported hazard names are `knife`, `scissors`, `baseball bat`, and `gun`. Start with whichever of those you want to train; untrained classes are visibly flagged on the dashboard.
+
+Aim for **hundreds of varied, correctly labeled images per class**, plus plenty of ordinary **background images with no hazards**. Include different lighting, sizes, occlusion, viewpoints, people, and objects that look similar. Use footage from the actual camera environment where possible. Ask permission before collecting identifiable images. Avoid near-identical video frames appearing on both training and validation; keep a separate set of new scenes for a final real-world check. A webcam feed or two labeled images is not sufficient to claim a working security detector.
+
+## 3. Label images (no coding needed)
 
 ```sh
+python annotate.py
+```
+
+Choose the object class in the dropdown, **drag a rectangle tightly around each visible hazard**, and press **Next**. Multiple boxes per picture are supported. If a picture has no hazards, leave it blank and press Next (it becomes a valuable background example). Previous, Undo, and Save buttons are provided. The tool saves as you go in `dataset/annotations.json`; images and labels are Git-ignored by default. Use your own `--images-dir` and `--annotations` paths if desired.
+
+The JSON format is intentionally simple and editable:
+
+```json
+{
+  "version": 1,
+  "images": [
+    {"file": "photo_001.jpg", "boxes": [
+      {"label": "gun", "bbox": [20, 35, 65, 40]}
+    ]},
+    {"file": "empty_scene.jpg", "boxes": []}
+  ]
+}
+```
+
+A box is `[left, top, width, height]` in **original-image pixels**; image paths are relative to `dataset/images/`. The labeler creates this file for you. Each trained class needs at least two different labeled images so one can go into training and one into validation. More data is strongly recommended.
+
+## 4. Train your OWN network
+
+```sh
+python train.py --dry-run
+python train.py --epochs 30 --batch-size 8
+```
+
+The dry run checks filenames, boxes, class names and train/validation split **without training**. Training prints loss and validation precision/recall at IoU 0.5 (using a 0.3 score cutoff for these metrics). It saves the best-validation-loss model at `data/models/visionguard_gridnet.pt`. A CPU can take a while; run `python train.py --help` for batch size, image size, CPU/GPU device, resume, and custom dataset/model paths. Start with `--batch-size 2` if you run out of memory. Resume only works when the active classes and image size are unchanged; adding a new class requires retraining from scratch. The model file is ignored by Git unless you explicitly choose to publish it.
+
+**What's inside:** `modules/custom_detector.py` defines **GridNet**, a small convolutional network written for this project. It predicts objectness, class and bounding box on a 16-pixel grid with two predictions per cell, uses balanced objectness/box/class losses, and applies class-aware non-maximum suppression. Training is from random initialization using your photos; PyTorch supplies tensor operations and autograd, **not** a pretrained model. The simple architecture can miss small/occluded objects or more than two object centers in one grid cell (skipped boxes are reported during training). Good labels, sufficient data and independent testing matter more than changing a threshold.
+
+## 5. Test on a NEW image, then open the monitor
+
+```sh
+python predict.py path/to/new_photo.jpg
 python main.py
 ```
 
-The app initializes its SQLite database on startup. If your camera is not found, check OS permissions and `CAMERA_INDEX` in `config.py`, then click **Retry camera**. To register a person, click **Register face**, choose a photo containing exactly one detectable face, and enter a name. Registrations made in the separate utility can be applied without restarting by clicking **Reload faces**:
+`predict.py` prints labels and scores and writes an annotated image to `data/predictions/`. It does not need a webcam. Test photos that were **not** used for labeling or training. An empty result is not proof of safety. You can specify `--threshold 0.3` for a different confidence cutoff.
 
-```sh
-python face_register.py
-```
+Press **Reload detector** after training if the dashboard is already open, or restart the monitor. `DETECTION_CONFIDENCE_THRESHOLD` in `config.py` controls how confident a detection must be. If the model does not exist or fails to load, object detection stays off and the status reads **DEGRADED**. If you trained only `gun`, the other three class names remain untrained and are listed in the warning.
 
-A freshly cloned repo needs no pre-existing database: either registration path initializes it. Face photos are re-encoded without EXIF and placed under `data/faces/` using generated filenames; active SQLite registrations determine who can be recognized. Deactivating an entry through the `Database` API and reloading faces removes it from the face model. The displayed face-match score is derived from LBPH distance; **it is not a probability**. For production use, collect multiple consented images per identity and validate match thresholds on your actual camera and environment.
+The monitor uses **one threat policy** for the overlay and dashboard: unknown face alone -> HIGH; scissors with a known/no face -> MEDIUM; knife/baseball bat with a known/no face -> HIGH; unknown face plus a HIGH hazard -> CRITICAL; trained gun detection -> CRITICAL. A recognized person is not inherently safe. A hazard detection does not prove someone is holding the object. HIGH and CRITICAL incidents are rate-limited, saved to SQLite and optionally annotated screenshots, and displayed under Recent Alerts. No email, push or alarm audio is sent.
 
-## What the monitor records
+Face registration is a separate option: press **Register face** in the app or run `python face_register.py`. Supply one clear face per photo; use **Reload faces** for updates made from the standalone utility. Face recognition uses OpenCV Haar detection and LBPH trained from active SQLite registrations, **not** GridNet. LBPH match scores are *not probabilities*. For a fresh checkout either registration path creates the database. Set `CAMERA_INDEX` in `config.py` or press Retry camera if necessary.
 
-On each new frame, a background capture thread supplies an image to the inference worker. Face and object detectors run at the intervals configured in `config.py`. `ThreatAssessment` applies a single policy to their latest results, which drives **both** the video overlay and the dashboard:
+## Files, tests and privacy
 
-| People | Highest detected hazard | Result |
-| --- | --- | --- |
-| No face / known face | None | LOW |
-| Any unknown face | None | HIGH |
-| Known face | Scissors | MEDIUM |
-| Known face / no face | Knife or baseball bat | HIGH |
-| Any unknown face | Knife or baseball bat | CRITICAL |
-| Any face status | Gun, if a compatible custom model is supplied | CRITICAL |
+- `annotate.py` — click-and-drag image labeling; `train.py` — validation/training/metrics; `predict.py` — single-image check.
+- `modules/custom_detector.py` — custom PyTorch GridNet, transforms, loss, prediction decoder.
+- `modules/training_data.py`, `modules/object_detection.py` — dataset checks and live inference.
+- `modules/camera.py`, `modules/monitor.py`, `modules/threat_assessment.py`, `modules/alert_system.py` — capture, processing, risk policy, logging.
+- `ui/main_window.py` — desktop dashboard; `modules/database.py` — SQLite.
+- `data/models/visionguard_gridnet.pt` — **created by you** after training; not shipped.
+- `data/faces/`, `data/screenshots/`, `data/predictions/`, `data/security.db`, and `dataset/` are local runtime files ignored by Git.
 
-Rules are defined in `Config.THREAT_RULES` and have a fallback for hazards with no detected face. **LOW means no configured threat was found, not that a scene is safe.** Hazard classification describes an object in the scene, not whether a person is holding it. The dashboard flags disabled/unavailable detection or unsupported model classes as **DEGRADED**.
-
-HIGH and CRITICAL incidents write to `data/security.db` (`alert_history` and `detection_logs`), may save an annotated screenshot in `data/screenshots/`, and appear in **Recent Alerts**. The global alert cooldown is 5 seconds by default; escalation to CRITICAL bypasses a HIGH cooldown. MEDIUM and LOW scenes are not saved to the incident log, and the app does not send email/push notifications or play audio. Database/files are local and are ignored by Git. Set `ALERT_SCREENSHOT_ON_HIGH_RISK` and `ALERT_SCREENSHOT_ON_UNKNOWN` in `config.py` to control screenshot capture.
-
-## Project layout
-
-- `main.py` — initialization and shutdown.
-- `config.py` — paths, camera parameters, detection intervals and risk policy.
-- `face_register.py`, `modules/registration.py` — standalone and integrated registration.
-- `modules/camera.py`, `modules/monitor.py` — capture and off-UI-thread inference.
-- `modules/face_recognition_module.py`, `modules/object_detection.py` — detectors.
-- `modules/threat_assessment.py`, `modules/alert_system.py`, `modules/database.py` — policy, incidents and storage.
-- `ui/main_window.py` — Tkinter dashboard.
-- `data/models/yolov8n.pt` — bundled COCO weights; `data/faces/`, `data/screenshots/` and `data/security.db` are generated at runtime.
-
-## Tests and privacy
-
-Run headless regression tests with:
+Headless automated tests (including one tiny synthetic one-epoch training run) are available:
 
 ```sh
 python -m unittest discover -s tests -v
 ```
 
-Tests do not require a webcam, display or Ultralytics installation, but do require OpenCV and NumPy. A full desktop acceptance test still requires a webcam, installed requirements and a real Tkinter display. Verify visual accuracy and false-positive rates before relying on any alert.
-
-Face photos, screenshots and SQLite entries are sensitive personal data. Obtain consent, restrict filesystem access, set a retention/deletion policy and do not commit runtime data. `.gitignore` prevents accidental **new** Git additions but does not encrypt data or remove files already committed elsewhere.
+A synthetic training test verifies the code path, **not** that it can identify real hazards. Do a real webcam/display acceptance test and measure misses and false alarms on new scenes before relying on any alert. Treat face images, footage, annotations and incident screenshots as sensitive: obtain consent, restrict access, and choose a retention/deletion policy. `.gitignore` does not encrypt data or remove files you committed previously.

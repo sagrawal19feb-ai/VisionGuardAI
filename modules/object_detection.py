@@ -1,4 +1,4 @@
-"""YOLO object detection and policy labels for configured hazardous objects."""
+"""Inference adapter for the project's own GridNet neural network."""
 
 import logging
 from dataclasses import dataclass
@@ -21,72 +21,100 @@ class ObjectDetectionModule:
     def __init__(self, config):
         self.config = config
         self.model = None
+        self.device = None
+        self.class_names = []
+        self.image_size = None
         self.is_available = False
         self.unsupported_hazards = []
         self.last_error = False
-        self._load_model()
+        self.unavailable_reason = "Detector not trained"
+        self.reload_model()
 
-    def _load_model(self):
+    def reload_model(self):
+        """Load a trusted, weights-only GridNet checkpoint (or stay disabled)."""
+        self.model = None
+        self.is_available = False
+        self.unsupported_hazards = []
+        self.last_error = False
+        path = self.config.DETECTOR_MODEL
+        if not path.is_file():
+            self.unavailable_reason = "No trained detector · run python train.py"
+            logger.warning("No trained detector at %s", path)
+            return False
         try:
-            from ultralytics import YOLO
+            import torch
+            from modules.custom_detector import GridNet, validate_checkpoint
 
-            path = self.config.YOLO_MODEL
-            if not path.exists():
-                logger.error("YOLO model not found: %s", path)
-                return
-            self.model = YOLO(str(path))
-            names = self.model.names
-            supported = {
-                str(n).lower()
-                for n in (names.values() if isinstance(names, dict) else names)
-            }
-            self.unsupported_hazards = sorted(
-                set(self.config.HAZARDOUS_OBJECTS) - supported
+            checkpoint = torch.load(str(path), map_location="cpu", weights_only=True)
+            classes, size = validate_checkpoint(
+                checkpoint, self.config.HAZARDOUS_OBJECTS
             )
+            model = GridNet(len(classes))
+            model.load_state_dict(checkpoint["state_dict"], strict=True)
+            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            if device.type == "cpu":
+                torch.set_num_threads(min(4, torch.get_num_threads()))
+            self.model = model.to(device).eval()
+            self.device = device
+            self.class_names = classes
+            self.image_size = size
+            self.unsupported_hazards = sorted(
+                set(self.config.HAZARDOUS_OBJECTS) - set(classes)
+            )
+            self.is_available = True
+            self.unavailable_reason = ""
             if self.unsupported_hazards:
                 logger.warning(
-                    "Model has no labels for: %s", ", ".join(self.unsupported_hazards)
+                    "Untrained hazard labels: %s", ", ".join(self.unsupported_hazards)
                 )
-            self.is_available = True
-            logger.info("YOLO model loaded: %s", path)
-        except ImportError:
-            logger.error("Install ultralytics to enable object detection")
-        except Exception:
-            logger.exception("YOLO model could not be loaded")
+            logger.info("GridNet loaded: %s (%s)", path, device)
+            return True
+        except Exception as exc:
+            self.unavailable_reason = f"Detector load failed: {str(exc)[:100]}"
+            logger.exception("Cannot load GridNet checkpoint")
+            return False
 
     def detect(self, frame) -> List[DetectionResult]:
         if not self.is_available or self.model is None:
             return []
         try:
-            results = self.model(
-                frame, conf=self.config.YOLO_CONFIDENCE_THRESHOLD, verbose=False
+            import torch
+            from modules.custom_detector import decode_predictions, image_tensor
+
+            tensor, transform = image_tensor(frame, self.image_size)
+            with torch.inference_mode():
+                logits = self.model(tensor.unsqueeze(0).to(self.device))
+            results = decode_predictions(
+                logits,
+                transform,
+                self.class_names,
+                threshold=self.config.DETECTION_CONFIDENCE_THRESHOLD,
+                nms_iou=self.config.DETECTION_NMS_IOU,
             )
             detections = []
-            for result in results:
-                for box in result.boxes:
-                    label = str(result.names[int(box.cls[0])]).lower()
-                    info = self.config.HAZARDOUS_OBJECTS.get(label)
-                    detections.append(
-                        DetectionResult(
-                            label=label.title(),
-                            confidence=float(box.conf[0]),
-                            bbox=tuple(int(v) for v in box.xyxy[0]),
-                            is_hazardous=info is not None,
-                            threat_modifier=info["threat_modifier"] if info else "NONE",
-                            color=info["color"] if info else (0, 255, 0),
-                        )
+            for label, confidence, box in results:
+                info = self.config.HAZARDOUS_OBJECTS[label]
+                detections.append(
+                    DetectionResult(
+                        label=label.title(),
+                        confidence=confidence,
+                        bbox=box,
+                        is_hazardous=True,
+                        threat_modifier=info["threat_modifier"],
+                        color=info["color"],
                     )
+                )
             self.last_error = False
             return detections
         except Exception:
             self.last_error = True
-            logger.exception("YOLO inference failed")
+            logger.exception("GridNet inference failed")
             return []
 
     def highest_threat(self, detections) -> Optional[str]:
         priority = {"NONE": 0, "LOW": 1, "MEDIUM": 2, "HIGH": 3, "CRITICAL": 4}
         return max(
             (d.threat_modifier for d in detections if d.is_hazardous),
-            key=lambda t: priority.get(t, 0),
+            key=lambda threat: priority.get(threat, 0),
             default=None,
         )

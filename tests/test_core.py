@@ -249,29 +249,15 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(db.get_statistics()["registered_persons"], 1)
         self.assertTrue(path.exists())
 
-    def test_object_detector_reports_unsupported_hazards(self):
-        model_path = Path(self.temp.name) / "fake.pt"
-        model_path.touch()
-        config = type("ObjectTestConfig", (self.config,), {"YOLO_MODEL": model_path})
-        box = SimpleNamespace(cls=[0], conf=[0.9], xyxy=[[1, 2, 50, 60]])
-        result = SimpleNamespace(names={0: "knife", 1: "person"}, boxes=[box])
-
-        class FakeModel:
-            names = result.names
-
-            def __call__(self, *args, **kwargs):
-                return [result]
-
-        with mock.patch.dict(
-            "sys.modules",
-            {"ultralytics": SimpleNamespace(YOLO=lambda path: FakeModel())},
-        ):
-            detector = ObjectDetectionModule(config)
-        detections = detector.detect(self.frame)
-        self.assertEqual(len(detections), 1)
-        self.assertTrue(detections[0].is_hazardous)
-        self.assertEqual(detections[0].threat_modifier, "HIGH")
-        self.assertIn("gun", detector.unsupported_hazards)
+    def test_untrained_detector_warns_instead_of_claiming_coverage(self):
+        model_path = Path(self.temp.name) / "not-trained.pt"
+        config = type(
+            "ObjectTestConfig", (self.config,), {"DETECTOR_MODEL": model_path}
+        )
+        detector = ObjectDetectionModule(config)
+        self.assertFalse(detector.is_available)
+        self.assertEqual(detector.detect(self.frame), [])
+        self.assertIn("run python train.py", detector.unavailable_reason)
 
     def test_recognition_uses_only_active_people_and_reloads_cleanly(self):
         alice_image = Path(self.temp.name) / "alice.jpg"

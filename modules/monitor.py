@@ -40,6 +40,7 @@ class MonitoringWorker:
         self.events = queue.Queue()  # Incidents must not be dropped with stale frames.
         self._stop_event = threading.Event()
         self._reload_event = threading.Event()
+        self._reload_detector_event = threading.Event()
         self._thread = None
         self._counter = 0
         self._faces = []
@@ -61,6 +62,9 @@ class MonitoringWorker:
     def reload_faces(self):
         self._reload_event.set()
 
+    def reload_detector(self):
+        self._reload_detector_event.set()
+
     def stop(self):
         self._stop_event.set()
         if self._thread and self._thread is not threading.current_thread():
@@ -80,6 +84,14 @@ class MonitoringWorker:
                         self._counter = 0
                     except Exception:
                         logger.exception("Could not reload registered faces")
+                if self._reload_detector_event.is_set():
+                    self._reload_detector_event.clear()
+                    try:
+                        self.object_module.reload_model()
+                        self._objects = []
+                        self._counter = 0
+                    except Exception:
+                        logger.exception("Could not reload the object detector")
                 frame_number = self.camera.frame_count
                 if frame_number == last_frame_number:
                     self._stop_event.wait(0.02)
@@ -113,7 +125,7 @@ class MonitoringWorker:
                 warnings.append("Face detection failed")
         if not self.face_module.recognition_available:
             warnings.append("Face recognition unavailable")
-        if self._counter % max(1, self.config.YOLO_DETECTION_INTERVAL) == 0:
+        if self._counter % max(1, self.config.DETECTION_INTERVAL) == 0:
             try:
                 self._objects = self.object_module.detect(frame)
             except Exception:
@@ -121,7 +133,13 @@ class MonitoringWorker:
                 self._objects = []
                 warnings.append("Object detection failed")
         if not self.object_module.is_available:
-            warnings.append("Object detection unavailable")
+            warnings.append(
+                getattr(
+                    self.object_module,
+                    "unavailable_reason",
+                    "Object detection unavailable",
+                )
+            )
         elif self.object_module.last_error:
             warnings.append("Object inference failed")
         if self.object_module.unsupported_hazards:

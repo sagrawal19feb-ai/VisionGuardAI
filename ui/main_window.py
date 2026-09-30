@@ -52,6 +52,14 @@ class MainWindow:
         ).pack(side="right", padx=(0, 15))
         tk.Button(
             header,
+            text="Reload detector",
+            command=self.reload_detector,
+            bg="#374151",
+            fg="white",
+            padx=12,
+        ).pack(side="right", padx=8)
+        tk.Button(
+            header,
             text="Reload faces",
             command=self.reload_faces,
             bg="#374151",
@@ -98,8 +106,8 @@ class MainWindow:
         self.detections_label = self._label(side, "Logged incidents: 0")
         self.faces_label = self._label(side, "Faces: 0")
         self.unknown_label = self._label(side, "Unknown faces: 0", fg="#fbbf24")
-        self.object_label = self._label(side, "Objects: 0")
-        self.hazard_label = self._label(side, "Hazardous objects: 0", fg="#fb7185")
+        self.object_label = self._label(side, "Detector classes: 0/4")
+        self.hazard_label = self._label(side, "Hazards visible: 0", fg="#fb7185")
         tk.Label(
             side,
             text="RECENT ALERTS",
@@ -199,6 +207,16 @@ class MainWindow:
                 "Faces will load when the camera starts.",
                 parent=self.root,
             )
+
+    def reload_detector(self):
+        if not self.worker:
+            return
+        if self._monitoring:
+            self.worker.reload_detector()
+            self.status.config(text="Reloading trained detector…")
+        else:
+            self.worker.object_module.reload_model()
+            self.status.config(text="Detector checked · start the camera to monitor")
 
     def open_registration(self):
         dialog = tk.Toplevel(self.root)
@@ -329,9 +347,11 @@ class MainWindow:
         )
         self.faces_label.config(text=f"Faces: {len(result.faces)}")
         self.unknown_label.config(text=f"Unknown faces: {assessment['unknown_count']}")
-        self.object_label.config(text=f"Objects: {len(result.objects)}")
+        trained = len(self.worker.object_module.class_names)
+        total = len(self.config.HAZARDOUS_OBJECTS)
+        self.object_label.config(text=f"Detector classes: {trained}/{total}")
         self.hazard_label.config(
-            text=f"Hazardous objects: {len(assessment['hazardous_objects'])}"
+            text=f"Hazards visible: {len(assessment['hazardous_objects'])}"
         )
         if result.warnings:
             self.status.config(

@@ -11,6 +11,9 @@ venv/
 /data/security.db-*/
 /data/faces/
 /data/screenshots/
+/data/predictions/
+/data/models/visionguard_gridnet.pt*
+/dataset/
 /runs/
 
 # Editors and OS

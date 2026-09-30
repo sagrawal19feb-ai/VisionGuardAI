@@ -19,9 +19,10 @@ class Config:
     # LBPH returns a distance (lower is a better match), not a probability.
     FACE_RECOGNITION_DISTANCE_THRESHOLD = 80.0
     FACE_DETECTION_INTERVAL = 3
-    YOLO_MODEL = MODELS_DIR / "yolov8n.pt"
-    YOLO_CONFIDENCE_THRESHOLD = 0.45
-    YOLO_DETECTION_INTERVAL = 2
+    DETECTOR_MODEL = MODELS_DIR / "visionguard_gridnet.pt"
+    DETECTION_CONFIDENCE_THRESHOLD = 0.45
+    DETECTION_NMS_IOU = 0.45
+    DETECTION_INTERVAL = 2
 
     ALERT_COOLDOWN_SECONDS = 5
     ALERT_SCREENSHOT_ON_HIGH_RISK = True
@@ -36,8 +37,8 @@ class Config:
         "CRITICAL": {"hex": "#bc8cff", "bgr": (255, 140, 188), "priority": 4},
     }
 
-    # The bundled COCO YOLOv8n model does NOT contain a 'gun' class. A custom
-    # model with that label is required for the CRITICAL gun rule to trigger.
+    # Only labels present in a trained GridNet checkpoint can be detected.
+    # Missing classes are explicitly flagged as degraded in the dashboard.
     HAZARDOUS_OBJECTS = {
         "knife": {"threat_modifier": "HIGH", "color": (0, 0, 255)},
         "scissors": {"threat_modifier": "MEDIUM", "color": (0, 165, 255)},
