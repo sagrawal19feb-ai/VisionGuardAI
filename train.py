@@ -176,7 +176,16 @@ def train(args):
     )
     if device.type == "cuda" and not torch.cuda.is_available():
         raise ValueError("CUDA was requested but is not available")
-    model = GridNet(len(classes)).to(device)
+    use_pretrained = not args.from_scratch and not args.resume
+    model = GridNet(len(classes), pretrained=use_pretrained).to(device)
+    print(
+        "Feature initialization:",
+        "ImageNet MobileNetV3"
+        if use_pretrained
+        else "checkpoint"
+        if args.resume
+        else "random",
+    )
     if args.resume:
         previous = torch.load(args.resume, map_location="cpu", weights_only=True)
         old_classes, old_size = validate_checkpoint(previous, Config.HAZARDOUS_OBJECTS)
@@ -185,7 +194,14 @@ def train(args):
         model.load_state_dict(previous["state_dict"], strict=True)
         print(f"Continuing from {args.resume}; optimizer starts fresh.")
     optimizer = torch.optim.AdamW(
-        model.parameters(), lr=args.learning_rate, weight_decay=1e-4
+        [
+            {
+                "params": model.features.parameters(),
+                "lr": args.learning_rate * (1.0 if args.from_scratch else 0.1),
+            },
+            {"params": model.head.parameters(), "lr": args.learning_rate},
+        ],
+        weight_decay=1e-4,
     )
     train_loader = DataLoader(
         HazardDataset(training, classes, args.image_size, augment=True, seed=args.seed),
@@ -272,7 +288,9 @@ def parse_args(argv=None):
         "--annotations", type=Path, default=Path("dataset/annotations.json")
     )
     parser.add_argument("--images-dir", type=Path, default=None)
-    parser.add_argument("--output", type=Path, default=Config.DETECTOR_MODEL)
+    parser.add_argument(
+        "--output", type=Path, default=Config.MODELS_DIR / "visionguard_gridnet.pt"
+    )
     parser.add_argument("--image-size", type=int, default=320)
     parser.add_argument("--epochs", type=int, default=30)
     parser.add_argument("--batch-size", type=int, default=8)
@@ -284,6 +302,11 @@ def parse_args(argv=None):
     parser.add_argument("--device", choices=["auto", "cpu", "cuda"], default="auto")
     parser.add_argument(
         "--resume", type=Path, help="Resume weights with same classes/size"
+    )
+    parser.add_argument(
+        "--from-scratch",
+        action="store_true",
+        help="Skip ImageNet feature initialization (usually less accurate)",
     )
     parser.add_argument(
         "--dry-run", action="store_true", help="Validate labels without training"

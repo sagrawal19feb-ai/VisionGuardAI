@@ -56,7 +56,7 @@ class GridNetTests(unittest.TestCase):
         )
         loss.backward()
         self.assertTrue(torch.isfinite(loss))
-        self.assertIsNotNone(model.head.weight.grad)
+        self.assertIsNotNone(model.head[-1].weight.grad)
 
         cx, cy, w, h = transform.encode_box(box)
         cell_x, cell_y = int(cx * 10), int(cy * 10)
@@ -144,6 +144,7 @@ class GridNetTests(unittest.TestCase):
                 "2",
                 "--threads",
                 "1",
+                "--from-scratch",
             ]
         )
         with contextlib.redirect_stdout(io.StringIO()):

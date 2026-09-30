@@ -1,7 +1,9 @@
-"""VisionGuard GridNet: a small, original anchor-free convolutional detector.
+"""VisionGuard GridNet: our grid-based detection head on mobile CNN features.
 
-Each 16-pixel grid cell predicts up to two independently supervised objects.
-This module depends on PyTorch only; it does not load any pretrained weights.
+The default training uses ImageNet-initialized MobileNetV3 features for better
+small-dataset transfer; no YOLO/pretrained object detector is used. Use
+--from-scratch for random feature initialization. Each stride-16 cell predicts
+up to two independently supervised objects.
 """
 
 from dataclasses import dataclass
@@ -12,7 +14,7 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 
-FORMAT = "visionguard-grid-v1"
+FORMAT = "visionguard-grid-v2-mobilenet"
 STRIDE = 16
 SLOTS = 2
 
@@ -31,28 +33,39 @@ class ConvBlock(nn.Module):
 
 
 class GridNet(nn.Module):
-    """Trainable CNN written for this project; output is not a YOLO model."""
+    """Custom grid-based object detection head (no YOLO architecture/weights)."""
 
-    def __init__(self, num_classes):
+    def __init__(self, num_classes, pretrained=False):
         super().__init__()
         if num_classes < 1:
             raise ValueError("Train at least one class")
+        from torchvision.models import MobileNet_V3_Small_Weights, mobilenet_v3_small
+
         self.num_classes = num_classes
-        self.features = nn.Sequential(
-            ConvBlock(3, 24, 2),
-            ConvBlock(24, 48, 2),
-            ConvBlock(48, 80, 2),
-            ConvBlock(80, 128, 2),
-            ConvBlock(128, 128),
-            ConvBlock(128, 128),
+        weights = MobileNet_V3_Small_Weights.DEFAULT if pretrained else None
+        backbone = mobilenet_v3_small(weights=weights)
+        # First nine feature blocks stop at stride 16 (20x20 for a 320 image).
+        self.features = nn.Sequential(*list(backbone.features.children())[:9])
+        self.head = nn.Sequential(
+            ConvBlock(48, 96),
+            ConvBlock(96, 128),
+            nn.Conv2d(128, SLOTS * (5 + num_classes), 1),
         )
-        self.head = nn.Conv2d(128, SLOTS * (5 + num_classes), 1)
-        # New models should not raise confident detections before training.
+        self.register_buffer(
+            "mean",
+            torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1),
+            persistent=False,
+        )
+        self.register_buffer(
+            "std",
+            torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1),
+            persistent=False,
+        )
         with torch.no_grad():
-            self.head.bias.view(SLOTS, 5 + num_classes)[:, 0].fill_(-4.5)
+            self.head[-1].bias.view(SLOTS, 5 + num_classes)[:, 0].fill_(-4.5)
 
     def forward(self, images):
-        features = self.features(images)
+        features = self.features((images - self.mean) / self.std)
         output = self.head(features)
         batch, _, height, width = output.shape
         return output.reshape(batch, SLOTS, 5 + self.num_classes, height, width)
@@ -160,7 +173,11 @@ def detector_loss(logits, objectness, locations, classes):
     obj_error = F.binary_cross_entropy_with_logits(
         prediction[..., 0], objectness, reduction="none"
     )
-    obj_loss = 0.25 * obj_error[negative].mean()
+    # Focus on the most convincing false alarms, not the thousands of easy
+    # empty cells. This is critical for avoiding high-confidence background FPs.
+    negative_errors = obj_error[negative]
+    hard_count = min(negative_errors.numel(), max(50, int(positive.sum()) * 6))
+    obj_loss = 2.0 * negative_errors.topk(hard_count).values.mean()
     if positive.any():
         obj_loss = obj_loss + obj_error[positive].mean()
         box_loss = F.smooth_l1_loss(

@@ -1,4 +1,4 @@
-"""Check your trained GridNet on a NEW still image (no webcam needed)."""
+"""Check the trained non-YOLO detector on a NEW still image."""
 
 import argparse
 from pathlib import Path

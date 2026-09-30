@@ -19,7 +19,7 @@ class Config:
     # LBPH returns a distance (lower is a better match), not a probability.
     FACE_RECOGNITION_DISTANCE_THRESHOLD = 80.0
     FACE_DETECTION_INTERVAL = 3
-    DETECTOR_MODEL = MODELS_DIR / "visionguard_gridnet.pt"
+    DETECTOR_MODEL = MODELS_DIR / "visionguard_frcnn.pt"
     DETECTION_CONFIDENCE_THRESHOLD = 0.45
     DETECTION_NMS_IOU = 0.45
     DETECTION_INTERVAL = 2
@@ -37,7 +37,7 @@ class Config:
         "CRITICAL": {"hex": "#bc8cff", "bgr": (255, 140, 188), "priority": 4},
     }
 
-    # Only labels present in a trained GridNet checkpoint can be detected.
+    # Only labels validated in a loaded checkpoint can be detected.
     # Missing classes are explicitly flagged as degraded in the dashboard.
     HAZARDOUS_OBJECTS = {
         "knife": {"threat_modifier": "HIGH", "color": (0, 0, 255)},
