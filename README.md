@@ -1,4 +1,4 @@
-#GPCSSI Shivansh Agrawal (26CA057)  Kushagra Singh (26CA065)
+GPCSSI Shivansh Agrawal (26CA057)  Kushagra Singh (26CA065)
 
 # VisionGuardAI
 
