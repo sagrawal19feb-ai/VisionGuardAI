@@ -1,4 +1,4 @@
-"""Desktop command center; reads the same bounded state as the web dashboard."""
+"""Desktop monitor; reads the same bounded state as the web dashboard."""
 
 import logging
 import threading
@@ -37,7 +37,7 @@ class MainWindow:
         self._last_stats = 0.0
         self._last_frame = 0.0
 
-        root.title("VisionGuard · Local Command Center")
+        root.title("VisionGuardAI")
         root.geometry("1450x880")
         root.minsize(1060, 690)
         root.configure(bg=BG)
@@ -79,20 +79,13 @@ class MainWindow:
         header.pack(fill="x")
         brand = tk.Frame(header, bg=PANEL)
         brand.pack(side="left", padx=25, pady=14)
-        self.label(brand, "◈", 24, ACCENT, True).pack(side="left", padx=(0, 12))
-        brand_text = tk.Frame(brand, bg=PANEL)
-        brand_text.pack(side="left")
-        self.label(brand_text, "VISIONGUARD", 15, TEXT, True).pack(anchor="w")
-        self.label(brand_text, "LOCAL COMMAND CENTER", 8, MUTED).pack(anchor="w")
-        self.label(header, "●  PRIVATE SESSION", 10, CYAN, True).pack(
-            side="right", padx=28
-        )
+        self.label(brand, "VisionGuardAI", 20, TEXT, True).pack(side="left")
+        self.label(header, "●  LOCAL", 10, CYAN, True).pack(side="right", padx=28)
 
         content = tk.Frame(self.root, bg=BG)
         content.pack(fill="both", expand=True, padx=25, pady=(21, 16))
         title = tk.Frame(content, bg=BG)
         title.pack(fill="x", pady=(0, 19))
-        self.label(title, "Operational overview", 26, TEXT, True, BG).pack(side="left")
         controls = tk.Frame(title, bg=BG)
         controls.pack(side="right")
         for text, command in (
@@ -112,17 +105,16 @@ class MainWindow:
         self.retry_button.pack(side="left", padx=(4, 0))
 
         warning = tk.Frame(
-            content, bg="#372b23", highlightbackground="#76563d", highlightthickness=1
+            content, bg="#17252c", highlightbackground="#3a4d52", highlightthickness=1
         )
         warning.pack(fill="x", pady=(0, 15))
         self.label(
             warning,
-            "⚠   EXPERIMENTAL — The detector misses many hazards. "
-            "A LOW reading never means a scene is safe. Not tested on your webcam.",
+            "Prototype stage — detections may be inaccurate.",
             10,
-            "#ffdaa9",
-            True,
-            "#372b23",
+            "#bdd4dd",
+            False,
+            "#17252c",
         ).pack(anchor="w", padx=15, pady=11)
 
         metrics = tk.Frame(content, bg=BG)
@@ -171,7 +163,7 @@ class MainWindow:
         self.video.pack(fill="both", expand=True, padx=10, pady=(0, 10))
         self.label(
             feed,
-            "CAM 01   •   LOCAL WEBCAM   •   Verify all alerts manually",
+            "CAM 01   •   LOCAL WEBCAM",
             9,
             MUTED,
         ).pack(anchor="w", padx=18, pady=(0, 12))
@@ -305,13 +297,8 @@ class MainWindow:
         )
         self.fps_label.config(text=f"Camera FPS: {result.fps:.1f}")
         self.status.config(
-            text="EXPERIMENTAL · "
-            + (
-                "; ".join(result.warnings)
-                if result.warnings
-                else "No verified safety assurance"
-            ),
-            fg=AMBER,
+            text="; ".join(result.warnings) if result.warnings else "Monitoring active",
+            fg=AMBER if result.warnings else MUTED,
         )
         rgb = cv2.cvtColor(result.frame, cv2.COLOR_BGR2RGB)
         image = Image.fromarray(rgb)

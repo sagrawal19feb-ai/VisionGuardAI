@@ -2,7 +2,7 @@
 
 A **local-first, human-in-the-loop monitoring prototype** for a laptop webcam. It combines face registration, one trained **non-YOLO Faster R-CNN** detector, a shared threat policy, incident records, and two redesigned ways to view the **same running monitor**: a desktop app and a private localhost dashboard.
 
-> **Not a security guarantee.** On 154 selected public test photos at confidence 0.40 the checkpoint missed **55/86 knives** and **25/52 guns**. It has **never been validated on your webcam**. LOW means nothing was detected, **not** that the scene is safe. Do not use this as the sole basis for a safety decision. [Full measurements](TRAINING_REPORT.md) · [data and pretrained-weight rights](DATA_PROVENANCE.md).
+> **Prototype stage — detections may be inaccurate.** See the [test results and limitations](TRAINING_REPORT.md) and [data provenance](DATA_PROVENANCE.md) for details.
 
 ## Quick start
 
@@ -53,7 +53,7 @@ visionguard/
   core/monitor.py               face + object inference, overlays, threat + incidents
   core/state.py                 bounded, thread-safe latest frame and incident publication
   core/{camera,faces,registration,threat,alerts,database}.py
-  interfaces/desktop.py         native Tkinter command center
+  interfaces/desktop.py         native Tkinter dashboard
   interfaces/web/{server.py,index.html}  loopback HTTP API and self-contained dashboard
   training/{finetune,openimages,evaluate,dataset,metrics}.py
   legacy/gridnet.py             archived from-scratch experiment; never loaded live

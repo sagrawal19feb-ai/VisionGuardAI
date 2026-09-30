@@ -141,8 +141,6 @@ class MonitorService:
             warnings.append("Inference worker is not running · retry camera")
         if not self.objects.is_available:
             warnings.append(self.objects.unavailable_reason)
-        elif self.objects.model_warning:
-            warnings.append(self.objects.model_warning)
         if self.objects.unsupported_hazards:
             warnings.append(
                 "Model cannot detect: " + ", ".join(self.objects.unsupported_hazards)

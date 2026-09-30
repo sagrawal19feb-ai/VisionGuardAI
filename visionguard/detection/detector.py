@@ -30,7 +30,6 @@ class FasterRCNNDetector:
         self.device = None
         self.class_names = []
         self.backend = "frcnn"
-        self.model_warning = "Experimental public-data detector · not webcam-validated"
         self.gun_threshold = 0.4
         self.is_available = False
         self.unsupported_hazards = sorted(config.HAZARDOUS_OBJECTS)

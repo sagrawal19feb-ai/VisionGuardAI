@@ -144,8 +144,6 @@ class MonitoringWorker:
             )
         elif self.object_module.last_error:
             warnings.append("Object inference failed")
-        if getattr(self.object_module, "model_warning", None):
-            warnings.append(self.object_module.model_warning)
         if self.object_module.unsupported_hazards:
             warnings.append(
                 "Model cannot detect: "

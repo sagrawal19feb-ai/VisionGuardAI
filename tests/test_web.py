@@ -54,6 +54,12 @@ class WebTests(unittest.TestCase):
     def authorize(self):
         page = self.get("/")
         self.assertEqual(page.status_code, 200)
+        html = page.get_data(as_text=True)
+        self.assertIn("<h1>VisionGuardAI</h1>", html)
+        self.assertEqual(
+            html.count("Prototype stage — detections may be inaccurate."), 1
+        )
+        self.assertNotIn("command center", html.lower())
         self.index_page = page
         return re.search(
             r'name="csrf-token" content="([^"]+)"', page.get_data(as_text=True)
