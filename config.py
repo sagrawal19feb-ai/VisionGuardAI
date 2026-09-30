@@ -11,6 +11,7 @@ class Config:
     MODELS_DIR = DATA_DIR / "models"
     DATABASE_PATH = DATA_DIR / "security.db"
 
+    WEB_PORT = 8765  # Always bound to 127.0.0.1, never the LAN.
     CAMERA_INDEX = 0
     CAMERA_WIDTH = 1280
     CAMERA_HEIGHT = 720
@@ -21,7 +22,6 @@ class Config:
     FACE_DETECTION_INTERVAL = 3
     DETECTOR_MODEL = MODELS_DIR / "visionguard_frcnn.pt"
     DETECTION_CONFIDENCE_THRESHOLD = 0.45
-    DETECTION_NMS_IOU = 0.45
     DETECTION_INTERVAL = 2
 
     ALERT_COOLDOWN_SECONDS = 5

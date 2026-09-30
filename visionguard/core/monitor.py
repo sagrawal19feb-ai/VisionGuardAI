@@ -1,9 +1,10 @@
-"""Run slow vision inference off the Tkinter thread; publish only the latest frame."""
+"""Run inference once and publish bounded results to both local dashboards."""
 
 import logging
-import queue
 import threading
 from dataclasses import dataclass
+
+from visionguard.core.state import MonitorState
 
 logger = logging.getLogger(__name__)
 
@@ -36,8 +37,7 @@ class MonitoringWorker:
         self.alert_system = alert_system
         self.config = config
         self.database = database
-        self.frames = queue.Queue(maxsize=1)
-        self.events = queue.Queue()  # Incidents must not be dropped with stale frames.
+        self.state = MonitorState()  # Shared by both UIs; bounded frames and alerts.
         self._stop_event = threading.Event()
         self._reload_event = threading.Event()
         self._reload_detector_event = threading.Event()
@@ -45,6 +45,14 @@ class MonitoringWorker:
         self._counter = 0
         self._faces = []
         self._objects = []
+
+    @property
+    def is_running(self):
+        return (
+            self._thread is not None
+            and self._thread.is_alive()
+            and not self._stop_event.is_set()
+        )
 
     def start(self):
         if self._thread is not None and self._thread.is_alive():
@@ -102,13 +110,7 @@ class MonitoringWorker:
                     continue
                 last_frame_number = frame_number
                 try:
-                    result = self.process_frame(frame)
-                    if self.frames.full():
-                        try:
-                            self.frames.get_nowait()
-                        except queue.Empty:
-                            pass
-                    self.frames.put_nowait(result)
+                    self.process_frame(frame)
                 except Exception:
                     logger.exception("Frame processing failed")
         finally:
@@ -156,8 +158,8 @@ class MonitoringWorker:
             frame, self._faces, self._objects, assessment, fps=fps
         )
         incident = self.alert_system.process(assessment, annotated)
-        if incident is not None:
-            self.events.put(incident)
-        return FrameResult(
+        result = FrameResult(
             annotated, self._faces, self._objects, assessment, fps, tuple(warnings)
         )
+        self.state.publish(result, incident)
+        return result

@@ -8,8 +8,8 @@ import numpy as np
 import torch
 
 from config import Config
-from modules.object_detection import ObjectDetectionModule
-from modules.quality_detector import (
+from visionguard.detection.detector import FasterRCNNDetector
+from visionguard.detection.model import (
     FORMAT,
     LABEL_TO_ID,
     build_model,
@@ -64,7 +64,7 @@ class QualityDetectorTests(unittest.TestCase):
             self.assertNotIn("gun", validate_checkpoint(record))
             torch.save(record, path)
             config = type("QualityTestConfig", (Config,), {"DETECTOR_MODEL": path})
-            detector = ObjectDetectionModule(config)
+            detector = FasterRCNNDetector(config)
             self.assertTrue(detector.is_available, detector.unavailable_reason)
             self.assertEqual(detector.backend, "frcnn")
             self.assertIn("gun", detector.unsupported_hazards)

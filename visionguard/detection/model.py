@@ -5,6 +5,8 @@ VisionGuard extends its ROI classifier to detect guns and preserves the
 pretrained COCO classes for knife, scissors and baseball bat.
 """
 
+import math
+
 import torch
 from torchvision.models.detection import (
     FasterRCNN_MobileNet_V3_Large_320_FPN_Weights,
@@ -69,6 +71,19 @@ def validate_checkpoint(checkpoint):
     if not isinstance(checkpoint.get("state_dict"), dict):
         raise ValueError("Checkpoint has no model weights")
     enabled = checkpoint.get("enabled_classes")
-    if not isinstance(enabled, list) or not all(c in LABEL_TO_ID for c in enabled):
+    if (
+        not isinstance(enabled, list)
+        or not enabled
+        or not all(isinstance(c, str) and c in LABEL_TO_ID for c in enabled)
+        or len(enabled) != len(set(enabled))
+    ):
         raise ValueError("Checkpoint coverage metadata is invalid")
+    threshold = checkpoint.get("gun_threshold")
+    if (
+        not isinstance(threshold, (int, float))
+        or isinstance(threshold, bool)
+        or not math.isfinite(threshold)
+        or not 0 < threshold < 1
+    ):
+        raise ValueError("Checkpoint gun threshold must be between zero and one")
     return enabled

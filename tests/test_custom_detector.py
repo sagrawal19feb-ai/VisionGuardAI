@@ -12,7 +12,7 @@ import numpy as np
 import torch
 
 from config import Config
-from modules.custom_detector import (
+from visionguard.legacy.gridnet import (
     FORMAT,
     GridNet,
     box_iou,
@@ -21,10 +21,10 @@ from modules.custom_detector import (
     encode_targets,
     image_tensor,
 )
-from modules.object_detection import ObjectDetectionModule
-from modules.training_data import active_classes, load_manifest, split_records
-from predict import predict
-from train import parse_args, train
+from visionguard.detection.detector import FasterRCNNDetector
+from visionguard.training.dataset import active_classes, load_manifest, split_records
+from predict_gridnet import predict
+from train_gridnet import parse_args, train
 
 
 torch.set_num_threads(1)
@@ -153,32 +153,14 @@ class GridNetTests(unittest.TestCase):
         self.assertEqual(saved["format"], FORMAT)
         self.assertEqual(saved["classes"], ["gun"])
         config = type("TestDetectorConfig", (Config,), {"DETECTOR_MODEL": checkpoint})
-        detector = ObjectDetectionModule(config)
-        self.assertTrue(detector.is_available)
+        detector = FasterRCNNDetector(config)
+        self.assertFalse(detector.is_available)  # Legacy weights cannot load live.
         self.assertIn("knife", detector.unsupported_hazards)
-        self.assertNotIn("gun", detector.unsupported_hazards)
         preview = self.root / "preview.png"
         with contextlib.redirect_stdout(io.StringIO()):
             _, output = predict(images / "scene_2.png", preview, checkpoint)
         self.assertEqual(output, preview)
         self.assertIsNotNone(cv2.imread(str(preview)))
-
-        # Replace the network's predictions with a deterministic gun detection
-        # to test the inference adapter without claiming the toy model learned.
-        class PredictGun(torch.nn.Module):
-            def forward(self, images):
-                raw = torch.full((1, 2, 6, 8, 8), -20.0, device=images.device)
-                raw[0, 0, 0, 4, 4] = 12.0
-                raw[0, 0, 1:5, 4, 4] = torch.tensor(
-                    [0.0, 0.0, -1.0, -1.0], device=images.device
-                )
-                return raw
-
-        detector.model = PredictGun()
-        results = detector.detect(self.frame)
-        self.assertEqual(len(results), 1)
-        self.assertEqual(results[0].label, "Gun")
-        self.assertEqual(results[0].threat_modifier, "CRITICAL")
 
 
 if __name__ == "__main__":

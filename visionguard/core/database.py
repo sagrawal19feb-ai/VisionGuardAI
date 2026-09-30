@@ -81,6 +81,14 @@ class Database:
         )
         return dict(row) if row is not None else None
 
+    def get_person_by_id(self, person_id):
+        row = (
+            self._conn()
+            .execute("SELECT * FROM persons WHERE id=?", (person_id,))
+            .fetchone()
+        )
+        return dict(row) if row is not None else None
+
     def get_all_persons(self):
         rows = (
             self._conn()
@@ -92,7 +100,8 @@ class Database:
     def deactivate_person(self, person_id):
         with self._conn() as conn:
             cursor = conn.execute(
-                "UPDATE persons SET is_active=0 WHERE id=?", (person_id,)
+                "UPDATE persons SET is_active=0 WHERE id=? AND is_active=1",
+                (person_id,),
             )
         return cursor.rowcount > 0
 

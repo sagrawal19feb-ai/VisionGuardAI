@@ -10,13 +10,13 @@ import cv2
 import numpy as np
 
 from config import Config
-from modules.alert_system import AlertSystem
-from modules.database import Database
-from modules.face_recognition_module import FaceRecognitionModule, FaceResult
-from modules.monitor import MonitoringWorker
-from modules.object_detection import DetectionResult, ObjectDetectionModule
-from modules.registration import RegistrationError, register_person
-from modules.threat_assessment import ThreatAssessment
+from visionguard.core.alerts import AlertSystem
+from visionguard.core.database import Database
+from visionguard.core.faces import FaceRecognitionModule, FaceResult
+from visionguard.core.monitor import MonitoringWorker
+from visionguard.detection.detector import DetectionResult, FasterRCNNDetector
+from visionguard.core.registration import RegistrationError, register_person
+from visionguard.core.threat import ThreatAssessment
 
 
 class TempConfig(Config):
@@ -93,7 +93,7 @@ class CoreTests(unittest.TestCase):
         high = self.assessor.assess([self.unknown], [])
         critical = self.assessor.assess([self.unknown], [self.knife])
         with mock.patch(
-            "modules.alert_system.time.monotonic", side_effect=[100, 101, 102]
+            "visionguard.core.alerts.time.monotonic", side_effect=[100, 101, 102]
         ):
             first = alerts.process(high, self.frame)
             self.assertIsNone(alerts.process(high, self.frame))
@@ -136,8 +136,8 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(faces.detect_and_recognize.call_count, 1)
         self.assertEqual(objects.detect.call_count, 2)
         self.assertEqual(self.db.get_statistics()["total_alerts"], 1)
-        self.assertEqual(worker.events.qsize(), 1)
-        self.assertEqual(worker.events.get_nowait()["threat_level"], "CRITICAL")
+        self.assertEqual(len(worker.state.events_after(0)), 1)
+        self.assertEqual(worker.state.events_after(0)[0][1]["threat_level"], "CRITICAL")
 
     def test_background_worker_publishes_frame_and_incident(self):
         camera = SimpleNamespace(
@@ -166,12 +166,12 @@ class CoreTests(unittest.TestCase):
         )
         self.assertTrue(worker.start())
         try:
-            incident = worker.events.get(timeout=3)
-            displayed = worker.frames.get(timeout=3)
+            displayed = worker.state.wait_after(0, timeout=3)
+            incident = worker.state.events_after(0)[0][1]
         finally:
             worker.stop()
         self.assertEqual(incident["threat_level"], "CRITICAL")
-        self.assertEqual(displayed.assessment["threat_level"], "CRITICAL")
+        self.assertEqual(displayed.result.assessment["threat_level"], "CRITICAL")
         self.assertEqual(self.db.get_statistics()["total_alerts"], 1)
 
     def test_registration_validates_and_keeps_photos_in_faces_dir(self):
@@ -182,7 +182,8 @@ class CoreTests(unittest.TestCase):
             detectMultiScale=lambda *args, **kwargs: [(10, 10, 80, 80)],
         )
         with mock.patch(
-            "modules.registration.cv2.CascadeClassifier", return_value=fake_cascade
+            "visionguard.core.registration.cv2.CascadeClassifier",
+            return_value=fake_cascade,
         ):
             first = register_person("../Alice", image_path, self.config, self.db)
             self.assertEqual(first.parent, self.config.FACES_DIR)
@@ -194,7 +195,7 @@ class CoreTests(unittest.TestCase):
             self.assertEqual(self.db.get_person("../Alice")["id"], identity)
             self.assertEqual(self.db.get_statistics()["registered_persons"], 1)
         with mock.patch(
-            "modules.registration.cv2.CascadeClassifier",
+            "visionguard.core.registration.cv2.CascadeClassifier",
             return_value=SimpleNamespace(
                 empty=lambda: False, detectMultiScale=lambda *a, **k: []
             ),
@@ -211,7 +212,8 @@ class CoreTests(unittest.TestCase):
         )
         with (
             mock.patch(
-                "modules.registration.cv2.CascadeClassifier", return_value=fake_cascade
+                "visionguard.core.registration.cv2.CascadeClassifier",
+                return_value=fake_cascade,
             ),
             mock.patch.object(
                 self.db, "register_person", side_effect=RuntimeError("db failed")
@@ -241,7 +243,8 @@ class CoreTests(unittest.TestCase):
             empty=lambda: False, detectMultiScale=lambda *a, **k: [(0, 0, 80, 80)]
         )
         with mock.patch(
-            "modules.registration.cv2.CascadeClassifier", return_value=fake_cascade
+            "visionguard.core.registration.cv2.CascadeClassifier",
+            return_value=fake_cascade,
         ):
             path = register_person("Alice", image_path, fresh)
         db = Database(fresh.DATABASE_PATH)
@@ -254,10 +257,10 @@ class CoreTests(unittest.TestCase):
         config = type(
             "ObjectTestConfig", (self.config,), {"DETECTOR_MODEL": model_path}
         )
-        detector = ObjectDetectionModule(config)
+        detector = FasterRCNNDetector(config)
         self.assertFalse(detector.is_available)
         self.assertEqual(detector.detect(self.frame), [])
-        self.assertIn("run python train_quality.py", detector.unavailable_reason)
+        self.assertIn("run python train.py", detector.unavailable_reason)
 
     def test_recognition_uses_only_active_people_and_reloads_cleanly(self):
         alice_image = Path(self.temp.name) / "alice.jpg"
@@ -277,7 +280,7 @@ class CoreTests(unittest.TestCase):
         face_cv = SimpleNamespace(LBPHFaceRecognizer_create=lambda: fake_recognizer)
         with (
             mock.patch(
-                "modules.face_recognition_module.cv2.CascadeClassifier",
+                "visionguard.core.faces.cv2.CascadeClassifier",
                 return_value=fake_cascade,
             ),
             mock.patch.object(cv2, "face", face_cv, create=True),
@@ -307,7 +310,7 @@ class CoreTests(unittest.TestCase):
             empty=lambda: False, detectMultiScale=lambda *a, **k: [(0, 0, 80, 80)]
         )
         with mock.patch(
-            "modules.face_recognition_module.cv2.CascadeClassifier",
+            "visionguard.core.faces.cv2.CascadeClassifier",
             return_value=fake_cascade,
         ):
             recognizer = FaceRecognitionModule(self.config, self.db)

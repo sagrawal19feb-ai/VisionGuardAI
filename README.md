@@ -1,68 +1,89 @@
 # VisionGuardAI
 
-A local Python desktop security-monitoring **prototype** with a webcam, OpenCV face recognition, a **non-YOLO** trained object detector, a Tkinter dashboard, and incident logs/screenshots. Created for the 13th Gurugram Police Cyber Security Summer Internship Program (GPCSSI 2026) by Shivansh Agrawal and Kushagra Singh.
+A **local-first, human-in-the-loop monitoring prototype** for a laptop webcam. It combines face registration, one trained **non-YOLO Faster R-CNN** detector, a shared threat policy, incident records, and two redesigned ways to view the **same running monitor**: a desktop app and a private localhost dashboard.
 
-> **Human-in-the-loop only.** No image detector is a guarantee of safety. This model **missed 55/86 knives and 25/52 guns** on selected public test images. It has **not** been tested on your webcam. Treat a clear scene or a LOW label as *unverified*, not safe. See [data sources and full measurements](DATA_PROVENANCE.md).
+> **Not a security guarantee.** On 154 selected public test photos at confidence 0.40 the checkpoint missed **55/86 knives** and **25/52 guns**. It has **never been validated on your webcam**. LOW means nothing was detected, **not** that the scene is safe. Do not use this as the sole basis for a safety decision. [Full measurements](TRAINING_REPORT.md) · [data and pretrained-weight rights](DATA_PROVENANCE.md).
 
-## Quick start (Windows laptop)
+## Quick start
 
-Install Python 3.10+ and create a fresh virtual environment. CPU-only setup:
+Requires **Python 3.10+**, a working webcam, and (for desktop mode) a Tkinter GUI. Windows PowerShell example:
 
-```sh
+```powershell
 python -m venv .venv
-# Windows PowerShell: .venv\Scripts\Activate.ps1
-# Windows Command Prompt: .venv\Scripts\activate.bat
-# macOS/Linux: source .venv/bin/activate
+.venv\Scripts\Activate.ps1
 python -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
 python -m pip install -r requirements.txt
 python main.py
 ```
 
-For a supported GPU, use [PyTorch's installer](https://pytorch.org/get-started/locally/) instead of the CPU-install line. Linux also needs a working Tkinter GUI (e.g. `python3-tk`). Use the installed `opencv-contrib-python`, not a conflicting `opencv-python`, for LBPH face recognition. A display and webcam are required to test the desktop dashboard.
+For macOS/Linux activate with `source .venv/bin/activate` instead. On Ubuntu-like systems, install `python3-tk` if Tkinter is absent. For a compatible GPU, select the appropriate [PyTorch installer](https://pytorch.org/get-started/locally/) rather than the CPU line. `opencv-contrib-python` (in `requirements.txt`) is needed for LBPH face matching; conflicting OpenCV packages can prevent it from loading.
 
-The bundled **trained** `data/models/visionguard_frcnn.pt` detects four classes: knife, scissors, baseball bat and gun. The model is experimental; its score is not a safety probability. If the weight file is missing or invalid the UI **does not silently substitute a model**; object detection remains off and the status warns you. To try it on a still image without a webcam:
+**Desktop mode:** `python main.py` opens the native dashboard **and** starts the web dashboard in the same process. Click **Open web dashboard**, or visit **http://127.0.0.1:8765/** on *this computer*. They share a single camera, inference worker, incident log and set of registered people. Closing the desktop window also stops its web server.
+
+**Browser-only mode:** `python web.py` starts the same engine without Tkinter or a desktop display. Open **http://127.0.0.1:8765/** in a browser on the computer running the command. Press Ctrl+C to stop. Use `python web.py --port 8766` to choose another free local port. **Do not run `main.py` and `web.py` at the same time**—only one process can own a webcam reliably. `python main.py --no-web` disables the web server. If the port is occupied, desktop mode continues without it.
+
+**Localhost is intentional:** the HTTP server binds **127.0.0.1 only**, not `0.0.0.0` or your LAN IP. It validates the HTTP Host, uses a per-launch cookie and CSRF token for changes, and does not enable cross-origin access. This is **not a remote-access service**: do not port-forward or reverse-proxy it. Other software running *on this computer* can still access loopback; lock your OS account. The dashboard uses no CDN or cloud service. Faces, incident screenshots and SQLite records are stored unencrypted in `data/` and ignored by Git—obtain consent and establish retention and access rules.
+
+### Using the monitor
+
+- **Retry camera** if the camera is disconnected. Check OS webcam permission and `CAMERA_INDEX` in `config.py` if retry fails. A disconnected or stale camera shows **no live assessment**, not a misleading last-known LOW status.
+- **Register face** from either dashboard with a name and one clear photo showing exactly one detectable face. The same registered gallery is used by both. **Manage faces** (desktop) or **Deactivate** (web) stops recognizing a person and removes that person's stored registration photo; past incident records remain. A newly registered face is reloaded into the running worker. Face match scores are not calibrated probabilities.
+- **Reload model** after replacing `data/models/visionguard_frcnn.pt`. Missing or invalid weights disable hazard detection with an explicit coverage warning; the app never silently substitutes an untrained model. The bundled checkpoint enables knife, scissors, baseball bat and gun, but **none is certified**. The dashboard remains usable without a camera or valid model.
+- **Incidents**: HIGH and CRITICAL assessments are rate-limited, logged in `data/security.db`, and can create annotated JPG screenshots under `data/screenshots/`. Alerts have no email or push notification. Detection does not show who *holds* an object. An unknown face alone rates HIGH; scissors MEDIUM; knife or baseball bat HIGH; gun CRITICAL; unknown face plus HIGH hazard CRITICAL. A known face does not negate a hazard.
+
+Still-image check (no webcam required):
 
 ```sh
-python predict.py path/to/a/photo.jpg
+python predict.py path/to/photo.jpg
 ```
 
-That saves an annotated copy under `data/predictions/`. Absence of a predicted box does *not* mean the object is absent. `DETECTION_CONFIDENCE_THRESHOLD` in `config.py` controls the original COCO classes; the gun threshold is stored in the checkpoint. Higher thresholds reduce false alarms but miss more real objects.
+This saves a marked image under `data/predictions/`. No drawn box **does not** mean the image is safe. `DETECTION_CONFIDENCE_THRESHOLD` in `config.py` sets the COCO classes' threshold (default 0.45); gun's 0.40 default is stored in the checkpoint. Raising either threshold can reduce false alerts while missing more real objects.
 
-### Registering faces
+## How the code is organized
 
-Click **Register face** in the app, or run `python face_register.py` separately. Supply one clear face per photo. Click **Reload faces** after using the standalone tool. Face recognition uses OpenCV Haar detection and LBPH from **active** SQLite registrations, not the object detector. Its displayed match scores are **not probabilities**. If your webcam does not open, check OS permissions and `CAMERA_INDEX` in `config.py`, then click Retry camera.
+The live application is built around **one model family**, rather than selecting from experimental architectures at runtime:
 
-## How the detector was built
+```text
+main.py / web.py                desktop + web  /  browser-only entry points
+config.py                      local paths, camera settings, alert policy
+visionguard/
+  detection/model.py            TorchVision Faster R-CNN architecture + checkpoint validation
+  detection/detector.py         trained-checkpoint loading and BGR-frame inference
+  core/service.py               single camera/worker/database lifecycle + UI commands
+  core/monitor.py               face + object inference, overlays, threat + incidents
+  core/state.py                 bounded, thread-safe latest frame and incident publication
+  core/{camera,faces,registration,threat,alerts,database}.py
+  interfaces/desktop.py         native Tkinter command center
+  interfaces/web/{server.py,index.html}  loopback HTTP API and self-contained dashboard
+  training/{finetune,openimages,evaluate,dataset,metrics}.py
+  legacy/gridnet.py             archived from-scratch experiment; never loaded live
+train.py / evaluate_detector.py / prepare_openimages.py  short CLI entry points
+```
 
-There is **no YOLO / Ultralytics dependency**. Accuracy was more important than claiming a completely original architecture: the default model uses **TorchVision Faster R-CNN MobileNetV3-320 pretrained on COCO** for the existing knife, scissors and baseball-bat classes. `modules/quality_detector.py` adds and fine-tunes a separate gun class using public bounding-box images; `modules/object_detection.py` serves the resulting checkpoint through the same dashboard pipeline. [The exact data and pretrained-weight sources and rights cautions](DATA_PROVENANCE.md) are documented. All four classes are enabled in the current experimental checkpoint because the gun class passed a limited internal validation gate; **none is certified for deployment**.
+The worker publishes each annotated frame **once**, then the desktop polls the latest snapshot while localhost streams JPEGs from that same snapshot. Neither UI reads the webcam directly, runs a second model, or steals frames from the other. Both read the same SQLite incident records; the browser cannot request arbitrary file paths or screenshots. HTTP endpoints are localhost-only (`/api/status`, `/api/stream.mjpeg`, `/api/alerts`, `/api/people` and protected POST actions). There is no YOLO or Ultralytics dependency.
 
-The repository also keeps `modules/custom_detector.py` (GridNet), a hand-written trainable grid architecture. That from-scratch experiment produced too many false alarms and is **not used by default**. You can still train it with `python train.py`; do not mistake it for the bundled default model.
+The TorchVision **Faster R-CNN MobileNetV3-320 COCO** weights supply knife, scissors and baseball-bat predictions. `train.py` fine-tunes an added gun output while protecting the pretrained class rows, then writes a weights-only checkpoint; the live app does **not** download pretrained weights. The original GridNet work remains isolated as `train_gridnet.py`, `predict_gridnet.py` and `visionguard/legacy/gridnet.py` for experiments only. Those weights were not adequate for live use and cannot be loaded by the default monitor.
 
-## Rebuild/fine-tune it yourself
+## Rebuild and measure the detector
 
-The downloaded public **photos are not committed** and were removed from the packaged workspace to keep it small; the image IDs, manifests, and source records remain under `dataset/` in this workspace (also Git-ignored). Run the following commands to download photos again before retraining or using `evaluate_detector.py` (the official train CSV is large but streamed, not stored):
+Public photos are **not committed** and were removed from this packaged workspace. The source IDs/manifests remain only in this workspace's Git-ignored `dataset/`; new clones do not contain them. To re-download images, fine-tune, and independently measure the separate Open Images *test* split:
 
 ```sh
 python prepare_openimages.py --split train --per-class 300 --backgrounds 120
 python prepare_openimages.py --split test --per-class 40 --backgrounds 30
-python train_quality.py --epochs 8
-python evaluate_detector.py
+python train.py --epochs 8
+python evaluate_detector.py --thresholds 0.4 0.5 0.7
 ```
 
-These create local, Git-ignored `dataset/openimages_train/`, `dataset/openimages_test/` and a fine-tuned `data/models/visionguard_frcnn.pt`. Training on a CPU takes time. The train script uses an internal validation split and keeps COCO's original class rows fixed while fitting gun; the **official test split** is used only by the evaluation script. Do not repeatedly tune against the test split and present its scores as unbiased. `python train_quality.py --help` lists the batch, epoch, seed and resume options. After updating weights, click **Reload detector** or restart the monitor. Verify the resulting detection scores on **new footage from your actual webcam** before considering alerts.
+The official train box CSV is large and **streamed**, not saved to disk. Training takes time on CPU and selects a checkpoint using *internal train-side validation*. The Open Images **test** subset must not be used to select an epoch or repeatedly tune thresholds and then reported as an untouched evaluation. To annotate **your own consented** images, put them under `dataset/images/`, run `python annotate.py`, and label *all four* classes plus empty scenes. Then `python train.py --annotations dataset/annotations.json`; each class must appear in at least two images so it can be split into training and validation. For genuine improvement, use varied labeled laptop-webcam footage and keep entire sessions out of training for a fresh independent test. `python train.py --help` describes options; `train_quality.py` is an alias for the earlier CLI.
 
-To prepare your own (consented) images for the experimental original GridNet, place them under `dataset/images/`, run `python annotate.py` to drag boxes around each object (including photos with no hazards), then `python train.py --dry-run` and `python train.py --epochs 30`. That workflow is separate from the pretrained Faster R-CNN and needs substantial data and independent validation to compete.
+Data licensing and limitations: Open Images annotations are attributed in [DATA_PROVENANCE.md](DATA_PROVENANCE.md); an image being **listed** as CC BY does **not** verify its individual license. TorchVision's pretrained weights may have dataset-derived terms. Verify your rights before redistributing photographs or the adapted checkpoint.
 
-## Threats, privacy and checks
-
-The live UI and overlay share one policy: unknown face alone -> HIGH; scissors -> MEDIUM; knife/baseball bat -> HIGH; unknown face plus a HIGH hazard -> CRITICAL; gun -> CRITICAL. A recognized person is not inherently safe. Detection does not establish that a person holds an object. HIGH/CRITICAL alerts are rate-limited, written to `data/security.db`, optionally saved as annotated screenshots in `data/screenshots/`, and listed in Recent Alerts. It does not send email, push, or audio notifications. Missing detector or untrained labels produce a visible degraded-coverage warning.
-
-`dataset/`, face photos, screenshots, predictions and SQLite records are Git-ignored; none is encrypted. Obtain consent, restrict filesystem access, and set a retention policy. Individual Open Images photo rights are **not guaranteed** by its listing; do not redistribute images without checking them. Pretrained weights can have separate use terms; see [DATA_PROVENANCE.md](DATA_PROVENANCE.md).
-
-Headless tests (including synthetic training and model-load checks):
+## Verification and troubleshooting
 
 ```sh
 python -m unittest discover -s tests -v
+python -m compileall -q .
 ```
 
-These tests do not replace a real webcam/display test, an independent held-out evaluation, or a professional security review.
+Headless tests cover checkpoint loading, the shared state, incident policy, database/face registration, localhost/CSRF controls and the HTTP dashboard. They **do not** verify the physical webcam, face-matching reliability, or real-world detection safety. If the dashboard shows *No live frame*, check camera privacy permissions and retry; if the model says *Unavailable*, verify the checkpoint path and installed TorchVision version. If port 8765 is taken, pass `--port 8766` (or close the other service). Neither UI requires the Open Images photos for normal inference.

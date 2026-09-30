@@ -6,8 +6,8 @@ from pathlib import Path
 import cv2
 
 from config import Config
-from modules.object_detection import ObjectDetectionModule
-from modules.training_data import read_image
+from visionguard.detection.detector import FasterRCNNDetector
+from visionguard.training.dataset import read_image
 
 
 def predict(image_path, output_path=None, model_path=None, threshold=None):
@@ -26,7 +26,7 @@ def predict(image_path, output_path=None, model_path=None, threshold=None):
             ),
         },
     )
-    detector = ObjectDetectionModule(settings)
+    detector = FasterRCNNDetector(settings)
     if not detector.is_available:
         raise ValueError(detector.unavailable_reason)
     frame = read_image(image_path)

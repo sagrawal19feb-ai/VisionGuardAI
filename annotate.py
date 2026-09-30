@@ -11,7 +11,7 @@ import cv2
 from PIL import Image, ImageTk
 
 from config import Config
-from modules.training_data import read_image
+from visionguard.training.dataset import read_image
 
 COLORS = {
     "knife": "#ef4444",

@@ -4,7 +4,7 @@ import logging
 import tkinter as tk
 from tkinter import filedialog, messagebox
 
-from modules.registration import RegistrationError, register_person
+from visionguard.core.registration import RegistrationError, register_person
 
 logger = logging.getLogger(__name__)
 

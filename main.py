@@ -1,60 +1,53 @@
-"""VisionGuardAI desktop monitor entry point. Run with: python main.py"""
+"""Desktop monitor and optional private browser dashboard. Run: python main.py"""
 
+import argparse
 import logging
 import tkinter as tk
 
 from config import Config
-from modules.alert_system import AlertSystem
-from modules.camera import Camera
-from modules.database import Database
-from modules.face_recognition_module import FaceRecognitionModule
-from modules.monitor import MonitoringWorker
-from modules.object_detection import ObjectDetectionModule
-from modules.threat_assessment import ThreatAssessment
-from ui.main_window import MainWindow
+from visionguard.core.service import MonitorService
+from visionguard.interfaces.desktop import MainWindow
+from visionguard.interfaces.web.server import LocalWebServer
 
 
-def main():
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--port", type=int, default=Config.WEB_PORT)
+    parser.add_argument("--no-web", action="store_true", help="Desktop UI only")
+    args = parser.parse_args(argv)
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
     )
-    Config.create_dirs()
-    config = Config()
     root = tk.Tk()
-    database = None
-    camera = None
-    app = None
+    service = None
+    server = None
+    window = None
     try:
-        database = Database(config.DATABASE_PATH)
-        camera = Camera(
-            config.CAMERA_INDEX,
-            config.CAMERA_WIDTH,
-            config.CAMERA_HEIGHT,
-            config.CAMERA_FPS,
+        service = MonitorService(Config())
+        if not args.no_web:
+            try:
+                server = LocalWebServer(service, args.port)
+                server.start()
+            except OSError:
+                logging.exception("Local dashboard port unavailable; desktop continues")
+                server = None
+        window = MainWindow(
+            root,
+            service,
+            web_url=server.url if server else None,
+            stop_web=server.close if server else None,
         )
-        faces = FaceRecognitionModule(config, database)
-        objects = ObjectDetectionModule(config)
-        threat = ThreatAssessment(config)
-        alerts = AlertSystem(config, database)
-        worker = MonitoringWorker(
-            camera, faces, objects, threat, alerts, config, database
-        )
-        app = MainWindow(root, config)
-        app.set_modules(camera, worker, database)
-        if camera.start():
-            app.start()
-        else:
-            app.show_no_camera()
+        service.start()  # A missing webcam never prevents the UI from opening.
         root.mainloop()
     finally:
-        if app is not None:
-            app.close()
+        if window is not None:
+            window.close()
         else:
-            if camera is not None:
-                camera.stop()
-            if database is not None:
-                database.close()
+            if server:
+                server.close()
+            if service:
+                service.close()
             root.destroy()
 
 

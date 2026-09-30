@@ -8,7 +8,7 @@ import cv2
 import numpy as np
 
 from config import Config
-from modules.database import Database
+from visionguard.core.database import Database
 
 logger = logging.getLogger(__name__)
 
