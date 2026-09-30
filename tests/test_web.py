@@ -60,6 +60,9 @@ class WebTests(unittest.TestCase):
             html.count("Prototype stage — detections may be inaccurate."), 1
         )
         self.assertNotIn("command center", html.lower())
+        self.assertIn('id="fullscreenButton"', html)
+        self.assertIn('id="exitFullscreenButton"', html)
+        self.assertIn(".feed:fullscreen", html)
         self.index_page = page
         return re.search(
             r'name="csrf-token" content="([^"]+)"', page.get_data(as_text=True)

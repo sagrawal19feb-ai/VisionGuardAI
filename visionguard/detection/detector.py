@@ -46,7 +46,7 @@ class FasterRCNNDetector:
         self.last_error = False
         path = self.config.DETECTOR_MODEL
         if not path.is_file():
-            self.unavailable_reason = "No detector checkpoint · run python train.py"
+            self.unavailable_reason = "No detector checkpoint · see README setup"
             logger.warning("No detector at %s", path)
             return False
         try:
@@ -98,7 +98,9 @@ class FasterRCNNDetector:
                 threshold = (
                     self.gun_threshold
                     if label == "gun"
-                    else self.config.DETECTION_CONFIDENCE_THRESHOLD
+                    else self.config.DETECTION_CLASS_THRESHOLDS.get(
+                        label, self.config.DETECTION_CONFIDENCE_THRESHOLD
+                    )
                 )
                 if confidence < threshold:
                     continue

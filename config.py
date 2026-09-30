@@ -22,6 +22,9 @@ class Config:
     FACE_DETECTION_INTERVAL = 3
     DETECTOR_MODEL = MODELS_DIR / "visionguard_frcnn.pt"
     DETECTION_CONFIDENCE_THRESHOLD = 0.45
+    # Knife 0.40 recovered more matched boxes with no extra knife false
+    # positives on train-side validation than the previous 0.45 default.
+    DETECTION_CLASS_THRESHOLDS = {"knife": 0.40}
     DETECTION_INTERVAL = 2
 
     ALERT_COOLDOWN_SECONDS = 5

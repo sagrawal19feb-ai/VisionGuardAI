@@ -17,7 +17,7 @@
 
 ## Separate Open Images test results
 
-For comparison, the table uses a fixed confidence **0.40** across all classes and box-match IoU **0.50**. The live app defaults to **0.45** on the three COCO classes and **0.40** on gun; its exact numbers will differ slightly. A prediction that does not match a labeled object of the same class counts as a false positive; an unmatched labeled object counts as a miss. Open Images' annotations may not be exhaustive, so treat these figures as approximate.
+For comparison, the table uses a fixed confidence **0.40** across all classes and box-match IoU **0.50**. After train-side threshold checks, the live app uses **0.40** for knife and gun, **0.45** for scissors and baseball bat; its exact numbers will differ slightly. The pretrained weights did not change during these later trials. A prediction that does not match a labeled object of the same class counts as a false positive; an unmatched labeled object counts as a miss. Open Images' annotations may not be exhaustive, so treat these figures as approximate.
 
 | Class | Matched / actual boxes | False positives | Precision | Recall |
 | --- | ---: | ---: | ---: | ---: |

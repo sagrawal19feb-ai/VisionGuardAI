@@ -46,21 +46,35 @@ def build_model(pretrained=False):
     return model
 
 
-def train_gun_head_only(model):
-    """Keep trusted COCO logits/regression fixed, train only new gun rows."""
+def train_head_rows(model, labels):
+    """Update only named hazard predictor rows, preserving all other COCO rows.
+
+    Use zero weight decay: optimizer weight decay could modify frozen rows even
+    when their gradients are masked. The backbone and proposal network remain
+    frozen; the model's weights-only checkpoint format stays unchanged.
+    """
+    selected = {LABEL_TO_ID[label] for label in labels}
+    if not selected or len(selected) != len(labels):
+        raise ValueError("Select distinct trained hazard labels")
     model.requires_grad_(False)
     predictor = model.roi_heads.box_predictor
     predictor.requires_grad_(True)
-    old = 91
     for param in (predictor.cls_score.weight, predictor.cls_score.bias):
         mask = torch.zeros_like(param)
-        mask[old:] = 1
+        for cls in selected:
+            mask[cls] = 1
         param.register_hook(lambda grad, keep=mask: grad * keep)
     for param in (predictor.bbox_pred.weight, predictor.bbox_pred.bias):
         mask = torch.zeros_like(param)
-        mask[old * 4 :] = 1
+        for cls in selected:
+            mask[cls * 4 : (cls + 1) * 4] = 1
         param.register_hook(lambda grad, keep=mask: grad * keep)
     return list(predictor.parameters())
+
+
+def train_gun_head_only(model):
+    """Keep trusted COCO rows fixed when learning a gun class from scratch."""
+    return train_head_rows(model, ["gun"])
 
 
 def validate_checkpoint(checkpoint):

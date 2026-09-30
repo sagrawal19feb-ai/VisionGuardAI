@@ -24,6 +24,7 @@ def evaluate(
     )
     floor = min(thresholds)
     detector.config.DETECTION_CONFIDENCE_THRESHOLD = floor
+    detector.config.DETECTION_CLASS_THRESHOLDS = {}
     detector.gun_threshold = floor  # Evaluation applies the same cutoff to all labels.
     predictions = []
     for record in records:

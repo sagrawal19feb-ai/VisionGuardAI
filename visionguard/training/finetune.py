@@ -10,7 +10,6 @@ import cv2
 import torch
 from torch.utils.data import DataLoader, Dataset
 
-from config import Config
 from visionguard.training.metrics import box_iou
 from visionguard.detection.model import (
     COCO_WEIGHTS,
@@ -258,7 +257,7 @@ def main():
         default=Path("dataset/openimages_train/annotations.json"),
     )
     parser.add_argument(
-        "--output", type=Path, default=Config.MODELS_DIR / "visionguard_frcnn.pt"
+        "--output", type=Path, default=Path("dataset/visionguard_retrained.pt")
     )
     parser.add_argument("--epochs", type=int, default=10)
     parser.add_argument("--patience", type=int, default=4)

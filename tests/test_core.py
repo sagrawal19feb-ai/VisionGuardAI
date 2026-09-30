@@ -260,7 +260,7 @@ class CoreTests(unittest.TestCase):
         detector = FasterRCNNDetector(config)
         self.assertFalse(detector.is_available)
         self.assertEqual(detector.detect(self.frame), [])
-        self.assertIn("run python train.py", detector.unavailable_reason)
+        self.assertIn("see README setup", detector.unavailable_reason)
 
     def test_recognition_uses_only_active_people_and_reloads_cleanly(self):
         alice_image = Path(self.temp.name) / "alice.jpg"

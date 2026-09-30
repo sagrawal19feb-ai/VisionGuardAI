@@ -24,6 +24,9 @@ def predict(image_path, output_path=None, model_path=None, threshold=None):
                 if threshold is not None
                 else Config.DETECTION_CONFIDENCE_THRESHOLD
             ),
+            "DETECTION_CLASS_THRESHOLDS": (
+                {} if threshold is not None else Config.DETECTION_CLASS_THRESHOLDS
+            ),
         },
     )
     detector = FasterRCNNDetector(settings)

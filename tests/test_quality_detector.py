@@ -13,12 +13,53 @@ from visionguard.detection.model import (
     FORMAT,
     LABEL_TO_ID,
     build_model,
+    train_head_rows,
     train_gun_head_only,
     validate_checkpoint,
 )
 
 
 class QualityDetectorTests(unittest.TestCase):
+    def test_knife_only_live_threshold_is_lower_than_other_coco_classes(self):
+        detector = FasterRCNNDetector.__new__(FasterRCNNDetector)
+        detector.config = Config()
+        detector.device = torch.device("cpu")
+        detector.class_names = ["knife", "scissors"]
+        detector.is_available = True
+        detector.last_error = False
+        detector.gun_threshold = 0.4
+
+        class FixedModel:
+            def __call__(self, _images):
+                return [
+                    {
+                        "boxes": torch.tensor(
+                            [[10.0, 10.0, 70.0, 70.0], [80.0, 10.0, 140.0, 70.0]]
+                        ),
+                        "scores": torch.tensor([0.42, 0.42]),
+                        "labels": torch.tensor(
+                            [LABEL_TO_ID["knife"], LABEL_TO_ID["scissors"]]
+                        ),
+                    }
+                ]
+
+        detector.model = FixedModel()
+        found = detector.detect(np.zeros((160, 160, 3), dtype=np.uint8))
+        self.assertEqual([item.label for item in found], ["Knife"])
+
+    def test_multi_hazard_mask_preserves_other_coco_classes(self):
+        model = build_model(pretrained=False)
+        train_head_rows(model, ["knife", "gun"])
+        head = model.roi_heads.box_predictor
+        (head.cls_score.weight.sum() + head.bbox_pred.weight.sum()).backward()
+        for cls in range(92):
+            expected = 1 if cls in (LABEL_TO_ID["knife"], LABEL_TO_ID["gun"]) else 0
+            self.assertEqual(int(head.cls_score.weight.grad[cls].abs().max()), expected)
+            self.assertEqual(
+                int(head.bbox_pred.weight.grad[cls * 4 : (cls + 1) * 4].abs().max()),
+                expected,
+            )
+
     def test_gun_head_gradient_does_not_change_pretrained_class_rows(self):
         torch.set_num_threads(1)
         model = build_model(pretrained=False)

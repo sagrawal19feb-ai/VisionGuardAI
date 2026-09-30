@@ -53,6 +53,7 @@ class EvaluateTests(unittest.TestCase):
         ):
             evaluate(Path("unused.json"), thresholds=(0.2, 0.5))
         self.assertEqual(FakeDetector.instance.gun_threshold, 0.2)
+        self.assertEqual(FakeDetector.instance.config.DETECTION_CLASS_THRESHOLDS, {})
         self.assertEqual(FakeDetector.instance.detect_calls, 1)
         self.assertEqual(len(re.findall(r"gun\s+TP=\s*1", output.getvalue())), 1)
         self.assertEqual(len(re.findall(r"gun\s+TP=\s*0", output.getvalue())), 1)

@@ -36,6 +36,8 @@ class MainWindow:
         self._event_number = 0
         self._last_stats = 0.0
         self._last_frame = 0.0
+        self._fullscreen_window = None
+        self._fullscreen_video = None
 
         root.title("VisionGuardAI")
         root.geometry("1450x880")
@@ -150,6 +152,10 @@ class MainWindow:
         feed_header = tk.Frame(feed, bg=PANEL)
         feed_header.pack(fill="x", padx=17, pady=12)
         self.label(feed_header, "Live camera feed", 13, TEXT, True).pack(side="left")
+        self.fullscreen_button = self.button(
+            feed_header, "Fullscreen ⛶", self.toggle_fullscreen
+        )
+        self.fullscreen_button.pack(side="right", padx=(8, 0))
         self.feed_pill = self.label(feed_header, "● NO SIGNAL", 10, MUTED, True)
         self.feed_pill.pack(side="right")
         self.video = tk.Label(
@@ -275,6 +281,9 @@ class MainWindow:
         self.feed_pill.config(text="● NO SIGNAL", fg=RED)
         self.video.configure(image="", text="NO LIVE CAMERA FRAME")
         self.video.image = None
+        if self._fullscreen_video is not None:
+            self._fullscreen_video.configure(image="", text="NO LIVE CAMERA FRAME")
+            self._fullscreen_video.image = None
         self.description.config(text="No live assessment")
         self.status.config(
             text="Camera unavailable · check permissions and camera index, "
@@ -301,17 +310,65 @@ class MainWindow:
             fg=AMBER if result.warnings else MUTED,
         )
         rgb = cv2.cvtColor(result.frame, cv2.COLOR_BGR2RGB)
+        self._draw_frame(self.video, rgb)
+        if self._fullscreen_video is not None:
+            self._draw_frame(self._fullscreen_video, rgb)
+
+    @staticmethod
+    def _draw_frame(widget, rgb):
         image = Image.fromarray(rgb)
         image.thumbnail(
-            (
-                max(320, self.video.winfo_width() - 12),
-                max(240, self.video.winfo_height() - 12),
-            ),
+            (max(320, widget.winfo_width() - 12), max(240, widget.winfo_height() - 12)),
             Image.Resampling.LANCZOS,
         )
-        photo = ImageTk.PhotoImage(image)
-        self.video.configure(image=photo, text="")
-        self.video.image = photo
+        photo = ImageTk.PhotoImage(image, master=widget)
+        widget.configure(image=photo, text="")
+        widget.image = photo
+
+    def toggle_fullscreen(self):
+        if self._fullscreen_window is not None:
+            self.exit_fullscreen()
+            return
+        window = tk.Toplevel(self.root)
+        window.title("VisionGuardAI · Camera")
+        window.configure(bg="#050a0f")
+        window.attributes("-fullscreen", True)
+        window.bind("<Escape>", lambda _event: self.exit_fullscreen())
+        window.protocol("WM_DELETE_WINDOW", self.exit_fullscreen)
+        toolbar = tk.Frame(window, bg=PANEL)
+        toolbar.pack(fill="x")
+        self.label(toolbar, "VisionGuardAI · Live camera", 14, TEXT, True).pack(
+            side="left", padx=18, pady=11
+        )
+        self.button(toolbar, "Exit fullscreen  Esc", self.exit_fullscreen).pack(
+            side="right", padx=18, pady=6
+        )
+        feed = tk.Label(
+            window,
+            bg="#050a0f",
+            fg=MUTED,
+            text="WAITING FOR LIVE CAMERA",
+            font=("Segoe UI", 17),
+        )
+        feed.pack(fill="both", expand=True)
+        self._fullscreen_window = window
+        self._fullscreen_video = feed
+        self.fullscreen_button.config(text="Exit fullscreen")
+        snapshot = self.service.worker.state.read()
+        if snapshot.result is not None and self.service.camera.is_available:
+            self._draw_frame(
+                feed, cv2.cvtColor(snapshot.result.frame, cv2.COLOR_BGR2RGB)
+            )
+        window.focus_force()
+
+    def exit_fullscreen(self):
+        if self._fullscreen_window is None:
+            return
+        window = self._fullscreen_window
+        self._fullscreen_window = None
+        self._fullscreen_video = None
+        self.fullscreen_button.config(text="Fullscreen ⛶")
+        window.destroy()
 
     def retry_camera(self):
         self.retry_button.config(state="disabled")
@@ -447,6 +504,7 @@ class MainWindow:
         if self._closed:
             return
         self._closed = True
+        self.exit_fullscreen()
         if self._poll_id is not None:
             self.root.after_cancel(self._poll_id)
         if self.stop_web:
