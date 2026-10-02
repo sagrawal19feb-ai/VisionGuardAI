@@ -2,7 +2,7 @@ GPCSSI Shivansh Agrawal (26CA057)  Kushagra Singh (26CA065)
 
 # VisionGuardAI
 
-A local webcam-monitoring prototype with face registration, incident logging, and a trained **non-YOLO Faster R-CNN** detector for knife, scissors, baseball bat, and gun. Use the desktop app, a localhost browser page, or both at once from **one process**.
+A local webcam-monitoring prototype with face registration, incident logging, and a trained **R-CNN** detector for knife, scissors, baseball bat, and gun. Use the desktop app, a localhost browser page, or both at once from **one process**.
 
 > Prototype stage — detections may be inaccurate. [Measured results and limitations](TRAINING_REPORT.md).
 
